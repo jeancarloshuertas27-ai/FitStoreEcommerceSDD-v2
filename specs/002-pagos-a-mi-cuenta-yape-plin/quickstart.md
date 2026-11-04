@@ -56,3 +56,4 @@ npm run dev
    - *Resultado esperado*: Se abre una ventana hacia `https://wa.me/51983064501` con el mensaje preformateado con el código de orden, monto, ítems y constancia de pago.
 3. Regresa a la tienda:
    - *Resultado esperado*: El badge del carrito se encuentra en `0` (vaciado automático). Al ir a "Mi Perfil y Mis Pedidos", la nueva orden aparece en el historial con su respectivo método y cuenta destino.
+

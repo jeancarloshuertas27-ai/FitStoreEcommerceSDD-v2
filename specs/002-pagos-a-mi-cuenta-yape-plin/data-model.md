@@ -61,3 +61,4 @@ sequenceDiagram
 3. **`Pagado / En Preparación`**: Se asigna automáticamente cuando el cliente paga con **Tarjeta de Crédito/Débito Sandbox**, dado que la pasarela autoriza el cobro de inmediato con código `AUTH-XXXX`.
 4. **`Enviado` / `Entregado`**: Estados posteriores de logística física.
 5. **`Cancelado`**: Si el voucher es inválido o el comprador desiste.
+

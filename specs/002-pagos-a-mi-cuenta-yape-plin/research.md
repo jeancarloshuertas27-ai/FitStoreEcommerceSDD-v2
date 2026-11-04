@@ -75,3 +75,4 @@
   Adjunto mi comprobante de pago para la validación y despacho. ¡Muchas gracias!
   ```
 - **Razón**: Automatiza el canal de atención comercial y verificación de vouchers sin fricción para el usuario ni para el dueño de la tienda.
+
