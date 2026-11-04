@@ -33,12 +33,8 @@ export default function CartDrawer({ onProceedToCheckout }) {
   if (!isCartOpen) return null;
 
   const handleCheckout = () => {
-    setCheckoutNotification(true);
-    setTimeout(() => {
-      setCheckoutNotification(false);
-      closeCart();
-      if (onProceedToCheckout) onProceedToCheckout();
-    }, 1000);
+    closeCart();
+    if (onProceedToCheckout) onProceedToCheckout();
   };
 
   return (
