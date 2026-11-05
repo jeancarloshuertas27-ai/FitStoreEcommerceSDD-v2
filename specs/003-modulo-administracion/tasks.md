@@ -23,8 +23,8 @@ description: "Lista de tareas para el Módulo 003: Panel de Administración Comp
 
 **Purpose**: Esqueleto del componente de administración y métodos del cliente HTTP.
 
-- [ ] T001 [P] Crear la estructura base del componente maestro `AdminPanel.jsx` con encabezado, sistema de tabs de navegación y modal de login demo en `frontend/src/components/AdminPanel.jsx`
-- [ ] T002 [P] Agregar los métodos administrativos (`createProduct`, `updateProduct`, `deleteProduct`, `updateOrderStatus`, `updatePaymentStatus`) al cliente HTTP en `frontend/src/services/api.js`
+- [X] T001 [P] Crear la estructura base del componente maestro `AdminPanel.jsx` con encabezado, sistema de tabs de navegación y modal de login demo en `frontend/src/components/AdminPanel.jsx`
+- [X] T002 [P] Agregar los métodos administrativos (`createProduct`, `updateProduct`, `deleteProduct`, `updateOrderStatus`, `updatePaymentStatus`) al cliente HTTP en `frontend/src/services/api.js`
 
 ---
 
@@ -34,8 +34,8 @@ description: "Lista de tareas para el Módulo 003: Panel de Administración Comp
 
 > **CRITICAL**: Esta fase debe completarse antes de iniciar las historias de usuario específicas.
 
-- [ ] T003 Integrar la navegación hacia `'admin'` en `Header.jsx` y coordinar la renderización condicional de `AdminPanel.jsx` según `activeTab` en `frontend/src/App.jsx`
-- [ ] T004 [P] Implementar el endpoint `GET /api/orders` con datos completos de ítems, pagos y destinatario en `backend/src/routes/orders.js` para abastecer el cálculo de KPIs del panel
+- [X] T003 Integrar la navegación hacia `'admin'` en `Header.jsx` y coordinar la renderización condicional de `AdminPanel.jsx` según `activeTab` en `frontend/src/App.jsx`
+- [X] T004 [P] Implementar el endpoint `GET /api/orders` con datos completos de ítems, pagos y destinatario en `backend/src/routes/orders.js` para abastecer el cálculo de KPIs del panel
 
 **Checkpoint**: Base lista: el administrador puede acceder a la ruta de administración y consultar la lista de pedidos en SQLite.
 
@@ -49,9 +49,9 @@ description: "Lista de tareas para el Módulo 003: Panel de Administración Comp
 
 ### Implementation for User Story 1
 
-- [ ] T005 [P] [US1] Construir la pantalla de login con el botón 'Acceso Rápido Admin Demo (1 clic)' que autocomplete las credenciales `admin@fitstore.pe` / `admin123` y guarde la sesión en `localStorage` (`fitstore_admin_auth = true`) en `frontend/src/components/AdminPanel.jsx`
-- [ ] T006 [P] [US1] Diseñar las 4 tarjetas de KPIs ejecutivos en tiempo real (Total Recaudado en Soles `S/`, Pagos Pendientes con badge de alerta, Catálogo con advertencia de stock $\le 5$, Total Clientes) en `frontend/src/components/AdminPanel.jsx`
-- [ ] T007 [US1] Implementar el botón de 'Cerrar Sesión Admin' (limpiando `localStorage`) y el botón de retorno rápido a la Tienda del Cliente en `frontend/src/components/AdminPanel.jsx`
+- [X] T005 [P] [US1] Construir la pantalla de login con el botón 'Acceso Rápido Admin Demo (1 clic)' que autocomplete las credenciales `admin@fitstore.pe` / `admin123` y guarde la sesión en `localStorage` (`fitstore_admin_auth = true`) en `frontend/src/components/AdminPanel.jsx`
+- [X] T006 [P] [US1] Diseñar las 4 tarjetas de KPIs ejecutivos en tiempo real (Total Recaudado en Soles `S/`, Pagos Pendientes con badge de alerta, Catálogo con advertencia de stock $\le 5$, Total Clientes) en `frontend/src/components/AdminPanel.jsx`
+- [X] T007 [US1] Implementar el botón de 'Cerrar Sesión Admin' (limpiando `localStorage`) y el botón de retorno rápido a la Tienda del Cliente en `frontend/src/components/AdminPanel.jsx`
 
 **Checkpoint**: Al completar esta fase, el MVP de acceso administrativo y dashboard financiero funciona de punta a punta y es verificable independientemente.
 
@@ -65,10 +65,10 @@ description: "Lista de tareas para el Módulo 003: Panel de Administración Comp
 
 ### Implementation for User Story 2
 
-- [ ] T008 [P] [US2] Implementar el endpoint `PUT /api/orders/:id/payment` en `backend/src/routes/orders.js` soportando `'Aprobado'` (orden `'Pagado / En Preparación'`) y `'Rechazado'` (orden `'Cancelado'` con reversión atómica de stock en `products`)
-- [ ] T009 [P] [US2] Implementar el endpoint `PUT /api/orders/:id/status` en `backend/src/routes/orders.js` para actualizar el avance logístico del pedido a `'Enviado'` o `'Entregado'`
-- [ ] T010 [US2] Construir la Pestaña 2 (Gestión de Pedidos y Conciliación) con tabla interactiva, filtros por estado (`Todos`, `En Verificación`, `Pagado`, `Enviado`, `Entregado`, `Cancelado`) y visualización de `destination_account` en `frontend/src/components/AdminPanel.jsx`
-- [ ] T011 [US2] Diseñar el modal 'Ver Voucher / Comprobante' en alta resolución con datos de transferencia (`destination_account`, monto en `S/`, N° operación) y botones 'Aprobar Abono en Mi Cuenta' y 'Rechazar Comprobante' en `frontend/src/components/AdminPanel.jsx`
+- [X] T008 [P] [US2] Implementar el endpoint `PUT /api/orders/:id/payment` en `backend/src/routes/orders.js` soportando `'Aprobado'` (orden `'Pagado / En Preparación'`) y `'Rechazado'` (orden `'Cancelado'` con reversión atómica de stock en `products`)
+- [X] T009 [P] [US2] Implementar el endpoint `PUT /api/orders/:id/status` en `backend/src/routes/orders.js` para actualizar el avance logístico del pedido a `'Enviado'` o `'Entregado'`
+- [X] T010 [US2] Construir la Pestaña 2 (Gestión de Pedidos y Conciliación) con tabla interactiva, filtros por estado (`Todos`, `En Verificación`, `Pagado`, `Enviado`, `Entregado`, `Cancelado`) y visualización de `destination_account` en `frontend/src/components/AdminPanel.jsx`
+- [X] T011 [US2] Diseñar el modal 'Ver Voucher / Comprobante' en alta resolución con datos de transferencia (`destination_account`, monto en `S/`, N° operación) y botones 'Aprobar Abono en Mi Cuenta' y 'Rechazar Comprobante' en `frontend/src/components/AdminPanel.jsx`
 
 **Checkpoint**: La conciliación bancaria directa de Yape/Plin y BCP está 100% operativa con protección de inventario.
 
@@ -82,9 +82,9 @@ description: "Lista de tareas para el Módulo 003: Panel de Administración Comp
 
 ### Implementation for User Story 3
 
-- [ ] T012 [P] [US3] Agregar validaciones de longitud (números telefónicos de exactamente 9 dígitos numéricos) en el endpoint `PUT /api/settings` en `backend/src/routes/settings.js`
-- [ ] T013 [US3] Construir la Pestaña 4 (Mis Cuentas Receptoras) con formulario conectado a `store_settings` para editar titular `owner_name`, `yape_number`, `plin_number`, `bank_name`, `bank_account_soles`, `bank_cci` y `whatsapp_notification` en `frontend/src/components/AdminPanel.jsx`
-- [ ] T014 [US3] Implementar la propagación reactiva de `store_settings` al guardar cambios para actualizar el estado global en `frontend/src/App.jsx` impactando en tiempo real en el Checkout y Footer de la tienda
+- [X] T012 [P] [US3] Agregar validaciones de longitud (números telefónicos de exactamente 9 dígitos numéricos) en el endpoint `PUT /api/settings` en `backend/src/routes/settings.js`
+- [X] T013 [US3] Construir la Pestaña 4 (Mis Cuentas Receptoras) con formulario conectado a `store_settings` para editar titular `owner_name`, `yape_number`, `plin_number`, `bank_name`, `bank_account_soles`, `bank_cci` y `whatsapp_notification` en `frontend/src/components/AdminPanel.jsx`
+- [X] T014 [US3] Implementar la propagación reactiva de `store_settings` al guardar cambios para actualizar el estado global en `frontend/src/App.jsx` impactando en tiempo real en el Checkout y Footer de la tienda
 
 **Checkpoint**: El propietario puede cambiar sus números de recaudación en vivo sin reiniciar el servidor.
 
@@ -98,12 +98,12 @@ description: "Lista de tareas para el Módulo 003: Panel de Administración Comp
 
 ### Implementation for User Story 4
 
-- [ ] T015 [P] [US4] Implementar el endpoint `POST /api/products` en `backend/src/routes/products.js` para registrar suplementos con categoría ('Proteínas', 'Creatinas', 'Pre-Entrenos', 'Accesorios'), precio en Soles (`REAL`), stock (`INTEGER`), imagen y flag destacado
-- [ ] T016 [P] [US4] Implementar el endpoint `PUT /api/products/:id` en `backend/src/routes/products.js` para actualizar en caliente datos, precios y stock de productos
-- [ ] T017 [P] [US4] Implementar el endpoint `DELETE /api/products/:id` en `backend/src/routes/products.js` retirando el producto del catálogo activo preservando el registro histórico en `order_items`
-- [ ] T018 [US4] Construir la Pestaña 1 (Productos y Precios) con tabla responsiva, buscador en tiempo real e insignias visuales de '¡Bajo Stock!' ($\le 5$) y 'Agotado' (0) en `frontend/src/components/AdminPanel.jsx`
-- [ ] T019 [US4] Implementar el modal de Creación y Edición de Productos y Precios con selector de imágenes fitness de muestra en `frontend/src/components/AdminPanel.jsx`
-- [ ] T020 [US4] Integrar la confirmación y ejecución de eliminación de productos en `frontend/src/components/AdminPanel.jsx`
+- [X] T015 [P] [US4] Implementar el endpoint `POST /api/products` en `backend/src/routes/products.js` para registrar suplementos con categoría ('Proteínas', 'Creatinas', 'Pre-Entrenos', 'Accesorios'), precio en Soles (`REAL`), stock (`INTEGER`), imagen y flag destacado
+- [X] T016 [P] [US4] Implementar el endpoint `PUT /api/products/:id` en `backend/src/routes/products.js` para actualizar en caliente datos, precios y stock de productos
+- [X] T017 [P] [US4] Implementar el endpoint `DELETE /api/products/:id` en `backend/src/routes/products.js` retirando el producto del catálogo activo preservando el registro histórico en `order_items`
+- [X] T018 [US4] Construir la Pestaña 1 (Productos y Precios) con tabla responsiva, buscador en tiempo real e insignias visuales de '¡Bajo Stock!' ($\le 5$) y 'Agotado' (0) en `frontend/src/components/AdminPanel.jsx`
+- [X] T019 [US4] Implementar el modal de Creación y Edición de Productos y Precios con selector de imágenes fitness de muestra en `frontend/src/components/AdminPanel.jsx`
+- [X] T020 [US4] Integrar la confirmación y ejecución de eliminación de productos en `frontend/src/components/AdminPanel.jsx`
 
 **Checkpoint**: El catálogo de FitStore Pro se gestiona dinámicamente con actualización instantánea de precios.
 
@@ -117,9 +117,9 @@ description: "Lista de tareas para el Módulo 003: Panel de Administración Comp
 
 ### Implementation for User Story 5
 
-- [ ] T021 [P] [US5] Actualizar el endpoint `GET /api/users` en `backend/src/routes/users.js` para incluir las métricas agregadas `orders_count` y `total_spent` en Soles (`S/`) por cliente
-- [ ] T022 [US5] Construir la Pestaña 3 (Gestión de Clientes) con tabla de clientes, DNI (8 dígitos), teléfono (9 dígitos), dirección, conteo de compras y total gastado en `frontend/src/components/AdminPanel.jsx`
-- [ ] T023 [US5] Integrar los modales para editar datos de clientes existentes y registrar nuevos clientes en SQLite en `frontend/src/components/AdminPanel.jsx`
+- [X] T021 [P] [US5] Actualizar el endpoint `GET /api/users` en `backend/src/routes/users.js` para incluir las métricas agregadas `orders_count` y `total_spent` en Soles (`S/`) por cliente
+- [X] T022 [US5] Construir la Pestaña 3 (Gestión de Clientes) con tabla de clientes, DNI (8 dígitos), teléfono (9 dígitos), dirección, conteo de compras y total gastado en `frontend/src/components/AdminPanel.jsx`
+- [X] T023 [US5] Integrar los modales para editar datos de clientes existentes y registrar nuevos clientes en SQLite en `frontend/src/components/AdminPanel.jsx`
 
 **Checkpoint**: El directorio de clientes y sus estadísticas comerciales están completamente integrados.
 
@@ -129,10 +129,10 @@ description: "Lista de tareas para el Módulo 003: Panel de Administración Comp
 
 **Purpose**: Validación de casos borde, alertas visuales y verificación de build sin errores.
 
-- [ ] T024 [P] Validar el manejo de estados de carga (skeletons / spinners), notificaciones de éxito y errores visuales en `frontend/src/components/AdminPanel.jsx`
-- [ ] T025 Sincronizar el badge del botón 'Panel Admin' en `Header.jsx` para alertar cuántos pagos pendientes de verificación existen en tiempo real
-- [ ] T026 Ejecutar la compilación integral del proyecto con `npm run build` verificando cero errores de sintaxis o empaquetado en frontend y backend
-- [ ] T027 Ejecutar la verificación de extremo a extremo de los 5 escenarios administrativos según [quickstart.md](./quickstart.md) en la base de datos `database.sqlite`
+- [X] T024 [P] Validar el manejo de estados de carga (skeletons / spinners), notificaciones de éxito y errores visuales en `frontend/src/components/AdminPanel.jsx`
+- [X] T025 Sincronizar el badge del botón 'Panel Admin' en `Header.jsx` para alertar cuántos pagos pendientes de verificación existen en tiempo real
+- [X] T026 Ejecutar la compilación integral del proyecto con `npm run build` verificando cero errores de sintaxis o empaquetado en frontend y backend
+- [X] T027 Ejecutar la verificación de extremo a extremo de los 5 escenarios administrativos según [quickstart.md](./quickstart.md) en la base de datos `database.sqlite`
 
 ---
 
@@ -189,3 +189,4 @@ flowchart TD
 5. User Story 4 (P4) → CRUD completo de productos y actualización en caliente de precios.
 6. User Story 5 (P5) → Directorio de clientes con estadísticas comerciales.
 7. Polish → Validación de casos borde, sincronización de alertas y `npm run build` sin errores.
+

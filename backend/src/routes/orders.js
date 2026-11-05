@@ -234,4 +234,102 @@ router.post('/', (req, res) => {
   }
 });
 
+// PUT /api/orders/:id/payment - Aprobar o rechazar comprobante de pago con reversión atómica de stock
+router.put('/:id/payment', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { payment_status } = req.body;
+
+    const validStatuses = ['Aprobado', 'Rechazado', 'Pendiente de Verificación'];
+    if (!validStatuses.includes(payment_status)) {
+      return res.status(400).json({
+        error: `Estado de pago inválido. Debe ser: ${validStatuses.join(', ')}`,
+      });
+    }
+
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    if (!order) {
+      return res.status(404).json({ error: 'Pedido no encontrado' });
+    }
+
+    let newOrderStatus = order.order_status;
+    let stockRestored = false;
+
+    if (payment_status === 'Aprobado') {
+      newOrderStatus = 'Pagado / En Preparación';
+    } else if (payment_status === 'Rechazado') {
+      newOrderStatus = 'Cancelado';
+      // Reversión atómica de stock solo si el pedido no estaba ya cancelado
+      if (order.order_status !== 'Cancelado') {
+        const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(id);
+        const updateStock = db.prepare(`
+          UPDATE products
+          SET stock = stock + ?
+          WHERE id = ?
+        `);
+        for (const item of items) {
+          if (item.product_id) {
+            updateStock.run(item.quantity, item.product_id);
+          }
+        }
+        stockRestored = true;
+      }
+    }
+
+    // Actualizar estado en orders y payments
+    db.prepare('UPDATE orders SET order_status = ? WHERE id = ?').run(newOrderStatus, id);
+    db.prepare('UPDATE payments SET payment_status = ? WHERE order_id = ?').run(payment_status, id);
+
+    res.json({
+      message: 'Estado de pago actualizado correctamente',
+      order_id: Number(id),
+      order_status: newOrderStatus,
+      payment_status,
+      stock_restored: stockRestored,
+    });
+  } catch (error) {
+    console.error('Error al actualizar estado del pago:', error);
+    res.status(500).json({ error: 'Error al actualizar el pago en SQLite' });
+  }
+});
+
+// PUT /api/orders/:id/status - Actualizar estado logístico del pedido ('Enviado', 'Entregado', etc.)
+router.put('/:id/status', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { order_status } = req.body;
+
+    const validStatuses = [
+      'Pendiente de Pago',
+      'En Verificación',
+      'Pagado / En Preparación',
+      'Enviado',
+      'Entregado',
+      'Cancelado',
+    ];
+
+    if (!order_status || !validStatuses.includes(order_status)) {
+      return res.status(400).json({
+        error: `Estado de pedido inválido. Debe ser uno de: ${validStatuses.join(', ')}`,
+      });
+    }
+
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+    if (!order) {
+      return res.status(404).json({ error: 'Pedido no encontrado' });
+    }
+
+    db.prepare('UPDATE orders SET order_status = ? WHERE id = ?').run(order_status, id);
+
+    res.json({
+      message: `Estado del pedido actualizado a ${order_status}`,
+      order_id: Number(id),
+      order_status,
+    });
+  } catch (error) {
+    console.error('Error al actualizar estado del pedido:', error);
+    res.status(500).json({ error: 'Error al actualizar estado del pedido en SQLite' });
+  }
+});
+
 export default router;

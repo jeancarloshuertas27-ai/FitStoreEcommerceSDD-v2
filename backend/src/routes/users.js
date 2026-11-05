@@ -3,13 +3,26 @@ import db from '../db/database.js';
 
 const router = Router();
 
-// GET /api/users - Listar usuarios (para alternar perfiles demo o gestión)
+// GET /api/users - Listar usuarios con métricas comerciales (orders_count y total_spent)
 router.get('/', (req, res) => {
   try {
     const users = db.prepare(`
-      SELECT id, name, dni, email, phone, address, city, role, created_at
-      FROM users
-      ORDER BY id ASC
+      SELECT
+        u.id,
+        u.name,
+        u.dni,
+        u.email,
+        u.phone,
+        u.address,
+        u.city,
+        u.role,
+        u.created_at,
+        COUNT(o.id) as orders_count,
+        ROUND(COALESCE(SUM(CASE WHEN o.order_status != 'Cancelado' THEN o.total ELSE 0 END), 0), 2) as total_spent
+      FROM users u
+      LEFT JOIN orders o ON u.id = o.user_id
+      GROUP BY u.id
+      ORDER BY u.id ASC
     `).all();
     res.json(users);
   } catch (error) {

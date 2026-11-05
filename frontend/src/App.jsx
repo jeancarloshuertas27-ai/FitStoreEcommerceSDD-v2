@@ -5,6 +5,7 @@ import ProductModal from './components/ProductModal.jsx';
 import CartDrawer from './components/CartDrawer.jsx';
 import ProfileView from './components/ProfileView.jsx';
 import CheckoutModal from './components/CheckoutModal.jsx';
+import AdminPanel from './components/AdminPanel.jsx';
 import { useUser } from './context/UserContext.jsx';
 import api from './services/api.js';
 import {
@@ -20,7 +21,7 @@ import {
 } from 'lucide-react';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('store'); // 'store' | 'profile'
+  const [activeTab, setActiveTab] = useState('store'); // 'store' | 'profile' | 'admin'
   const [selectedCategory, setSelectedCategory] = useState('Todos');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('featured');
@@ -32,6 +33,7 @@ export default function App() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [storeSettings, setStoreSettings] = useState(null);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [pendingVerificationCount, setPendingVerificationCount] = useState(0);
 
   const { currentUser } = useUser();
 
@@ -41,14 +43,30 @@ export default function App() {
       .catch((err) => console.error('Error cargando store_settings:', err));
   };
 
-  // Cargar productos ante cambio de filtros o búsqueda
-  useEffect(() => {
-    loadProducts();
-  }, [selectedCategory, searchQuery, sortBy]);
+  const loadPendingOrdersCount = () => {
+    api.getAllOrders()
+      .then((orders) => {
+        const count = orders.filter(
+          (o) =>
+            o.order_status === 'En Verificación' ||
+            o.payment?.payment_status === 'Pendiente de Verificación'
+        ).length;
+        setPendingVerificationCount(count);
+      })
+      .catch((err) => console.error('Error cargando conteo de pedidos:', err));
+  };
 
-  // Cargar configuración de la tienda al montar y al abrir checkout
+  // Cargar productos ante cambio de filtros, búsqueda o cambio a pestaña tienda
+  useEffect(() => {
+    if (activeTab === 'store') {
+      loadProducts();
+    }
+  }, [selectedCategory, searchQuery, sortBy, activeTab]);
+
+  // Cargar configuración de la tienda y pedidos al montar
   useEffect(() => {
     loadSettings();
+    loadPendingOrdersCount();
   }, []);
 
   useEffect(() => {
@@ -93,11 +111,29 @@ export default function App() {
         setSearchQuery={setSearchQuery}
         sortBy={sortBy}
         setSortBy={setSortBy}
+        pendingVerificationCount={pendingVerificationCount}
       />
 
       {/* Main Content Area */}
       <main className="flex-1">
-        {activeTab === 'profile' ? (
+        {activeTab === 'admin' ? (
+          <AdminPanel
+            storeSettings={storeSettings}
+            onUpdateSettings={(updated) => setStoreSettings(updated)}
+            onNavigateStore={() => {
+              setActiveTab('store');
+              loadProducts();
+            }}
+            onOrdersUpdated={(ordersList) => {
+              const pending = ordersList.filter(
+                (o) =>
+                  o.order_status === 'En Verificación' ||
+                  o.payment?.payment_status === 'Pendiente de Verificación'
+              ).length;
+              setPendingVerificationCount(pending);
+            }}
+          />
+        ) : activeTab === 'profile' ? (
           <ProfileView />
         ) : (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 animate-fadeIn">
@@ -250,7 +286,8 @@ export default function App() {
         storeSettings={storeSettings}
         currentUser={currentUser}
         onOrderCompleted={(newOrder) => {
-          // Si el usuario cambia a profile, verá la orden registrada
+          loadPendingOrdersCount();
+          loadProducts();
           console.log('Orden completada exitosamente:', newOrder.order_code);
         }}
       />
