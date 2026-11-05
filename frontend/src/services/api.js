@@ -48,6 +48,7 @@ export const api = {
   // Pedidos e Historial
   getUserOrders: (userId) => request(`/orders/user/${userId}`),
   getAllOrders: () => request('/orders'),
+  getOrderById: (id) => request(`/orders/${id}`),
   createOrder: (data) => request('/orders', { method: 'POST', body: JSON.stringify(data) }),
 };
 

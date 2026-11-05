@@ -4,6 +4,8 @@ import ProductCard from './components/ProductCard.jsx';
 import ProductModal from './components/ProductModal.jsx';
 import CartDrawer from './components/CartDrawer.jsx';
 import ProfileView from './components/ProfileView.jsx';
+import CheckoutModal from './components/CheckoutModal.jsx';
+import { useUser } from './context/UserContext.jsx';
 import api from './services/api.js';
 import {
   Sparkles,
@@ -29,18 +31,31 @@ export default function App() {
 
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [storeSettings, setStoreSettings] = useState(null);
+  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+
+  const { currentUser } = useUser();
+
+  const loadSettings = () => {
+    api.getSettings()
+      .then((data) => setStoreSettings(data))
+      .catch((err) => console.error('Error cargando store_settings:', err));
+  };
 
   // Cargar productos ante cambio de filtros o búsqueda
   useEffect(() => {
     loadProducts();
   }, [selectedCategory, searchQuery, sortBy]);
 
-  // Cargar configuración de la tienda una vez
+  // Cargar configuración de la tienda al montar y al abrir checkout
   useEffect(() => {
-    api.getSettings()
-      .then((data) => setStoreSettings(data))
-      .catch((err) => console.error('Error cargando store_settings:', err));
+    loadSettings();
   }, []);
+
+  useEffect(() => {
+    if (isCheckoutOpen) {
+      loadSettings();
+    }
+  }, [isCheckoutOpen]);
 
   const loadProducts = async () => {
     try {
@@ -225,8 +240,18 @@ export default function App() {
 
       {/* Drawer Deslizable de Carrito de Compras */}
       <CartDrawer
-        onProceedToCheckout={() => {
-          setActiveTab('profile');
+        onProceedToCheckout={() => setIsCheckoutOpen(true)}
+      />
+
+      {/* Modal de Checkout en 2 Pasos y Cobros al Propietario */}
+      <CheckoutModal
+        isOpen={isCheckoutOpen}
+        onClose={() => setIsCheckoutOpen(false)}
+        storeSettings={storeSettings}
+        currentUser={currentUser}
+        onOrderCompleted={(newOrder) => {
+          // Si el usuario cambia a profile, verá la orden registrada
+          console.log('Orden completada exitosamente:', newOrder.order_code);
         }}
       />
 

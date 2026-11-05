@@ -14,9 +14,11 @@ import {
   Clock,
   Check,
   X,
+  Eye,
 } from 'lucide-react';
 import { useUser } from '../context/UserContext.jsx';
 import api from '../services/api.js';
+import ElectronicReceipt from './ElectronicReceipt.jsx';
 
 export default function ProfileView() {
   const { users, currentUser, switchUser, updateCurrentUser, registerUser } = useUser();
@@ -44,6 +46,14 @@ export default function ProfileView() {
     city: 'Lima',
   });
   const [registerStatus, setRegisterStatus] = useState({ type: '', message: '' });
+  const [selectedReceiptOrder, setSelectedReceiptOrder] = useState(null);
+  const [storeSettings, setStoreSettings] = useState(null);
+
+  useEffect(() => {
+    api.getSettings()
+      .then((data) => setStoreSettings(data))
+      .catch((err) => console.error('Error cargando store_settings en ProfileView:', err));
+  }, []);
 
   // Sincronizar datos del formulario con el usuario actual
   useEffect(() => {
@@ -442,17 +452,27 @@ export default function ProfileView() {
                   </div>
                 </div>
 
-                {/* Bottom Total Bar */}
-                <div className="flex items-center justify-between pt-2">
+                {/* Bottom Total Bar con Botón Ver Boleta */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between pt-2 gap-2">
                   <span className="text-xs text-slate-400">
                     Dirección de Envío: <strong className="text-slate-300 font-normal">{order.shipping_address}</strong>
                   </span>
-                  <div className="text-right">
-                    <span className="text-xs text-slate-400 mr-2">Total Pagado:</span>
-                    <span className="text-base font-black text-white">
-                      <span className="text-orange-500 text-xs mr-0.5">S/</span>
-                      {order.total.toFixed(2)}
-                    </span>
+                  <div className="flex items-center gap-3 self-end sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedReceiptOrder(order)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-orange-400 border border-slate-700 flex items-center gap-1.5 transition-all shadow-sm"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Ver Boleta</span>
+                    </button>
+                    <div className="text-right">
+                      <span className="text-xs text-slate-400 mr-2">Total Pagado:</span>
+                      <span className="text-base font-black text-white">
+                        <span className="text-orange-500 text-xs mr-0.5">S/</span>
+                        {order.total.toFixed(2)}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -568,6 +588,16 @@ export default function ProfileView() {
             </form>
           </div>
         </div>
+      )}
+      {/* Modal Boleta Electrónica */}
+      {selectedReceiptOrder && (
+        <ElectronicReceipt
+          order={selectedReceiptOrder}
+          storeSettings={storeSettings}
+          onClose={() => setSelectedReceiptOrder(null)}
+          onGoToOrders={() => setSelectedReceiptOrder(null)}
+          onContinueShopping={() => setSelectedReceiptOrder(null)}
+        />
       )}
     </div>
   );

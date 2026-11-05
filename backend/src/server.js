@@ -23,6 +23,7 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // 3. Verificación de salud (Health Check)
 app.get('/api/health', (req, res) => {
