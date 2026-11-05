@@ -31,4 +31,5 @@
 
 ## Notes
 
-- Especificación completa para el Módulo 003 (Panel de Administración, CRUD de Productos y Precios, Verificación de Vouchers en mis cuentas, Gestión de Clientes y Configuración en Vivo de store_settings). Lista para clarificación o planificación.
+- Especificación completamente clarificada y validada para el Módulo 003 (Sesión de clarificación 2026-11-05: 4 preguntas resueltas sobre integridad de eliminación de productos, reversión de stock en rechazo de voucher, persistencia de sesión admin y umbral de alerta de bajo stock). Lista para `$speckit-plan`.
+

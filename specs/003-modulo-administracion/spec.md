@@ -8,6 +8,14 @@
 
 **Input**: User description: "Construir el Módulo de Administración integral de FitStore Pro conectado a SQLite para gestionar productos y precios, administrar clientes, verificar y aprobar los pagos recibidos en las cuentas del propietario, y contar con una pestaña dedicada para configurar/actualizar en cualquier momento el Número de Cuenta Bancaria, CCI y número de Yape/Plin del dueño de la tienda."
 
+## Clarifications
+
+### Session 2026-11-05
+- Q: ¿Cómo debe manejarse en SQLite la eliminación de un producto del catálogo que ya cuenta con pedidos históricos registrados en la tienda? → A: Eliminación del catálogo activo para nuevas compras preservando intacto el registro histórico en `order_items` con nombre (`product_name`) y precio unitario (`unit_price`) congelados.
+- Q: ¿Qué acción debe realizar el sistema respecto al inventario de suplementos cuando el administrador pulsa "Rechazar Comprobante" en un pedido en verificación? → A: Reversión automática inmediata: el sistema restituye de forma atómica en SQLite el stock de los productos del pedido hacia la tabla `products`, marcando la orden como `'Cancelado'` y el pago como `'Rechazado'`.
+- Q: ¿Cómo debe persistirse la sesión del administrador para permitir alternar fluidamente entre la Tienda del Cliente y el Panel Admin durante las pruebas y operación? → A: Persistencia en almacenamiento local (`localStorage`) que mantiene la sesión activa entre recargas y cambios de vista hasta que el usuario pulse explícitamente "Cerrar Sesión".
+- Q: ¿Qué umbral de unidades en inventario debe activar la alerta visual de stock crítico en el Dashboard y en la tabla de productos? → A: Umbral de 5 unidades o menos ($\le 5$) para activar la alerta en el Dashboard y la insignia roja "¡Bajo Stock!" en la tabla de productos, más la etiqueta "Agotado" si el stock llega a 0.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Autenticación Rápida y Dashboard Financiero con KPIs en Tiempo Real (Priority: P1)
@@ -45,7 +53,7 @@ Al hacer clic en **'Ver Voucher / Comprobante'** de un pedido pendiente:
 **Acceptance Scenarios**:
 1. **Given** una orden creada por Yape/Plin o Transferencia en estado `'En Verificación'`, **When** el administrador abre la pestaña de Pedidos, **Then** el pedido resalta con una insignia de atención y el botón "Ver Voucher".
 2. **Given** el modal de voucher abierto, **When** el administrador revisa la imagen y pulsa "Aprobar Abono en Mi Cuenta", **Then** el registro se actualiza en SQLite con `payment_status: 'Aprobado'` y `order_status: 'Pagado / En Preparación'`.
-3. **Given** un comprobante inválido o sospechoso, **When** el administrador pulsa "Rechazar Comprobante", **Then** la orden se actualiza a `'Cancelado'` y el pago a `'Rechazado'`.
+3. **Given** un comprobante inválido o sospechoso, **When** el administrador pulsa "Rechazar Comprobante", **Then** la orden se actualiza a `'Cancelado'`, el pago a `'Rechazado'`, y el stock de los productos se devuelve automáticamente a la tabla `products`.
 4. **Given** un pedido en preparación, **When** el administrador cambia el selector a `'Enviado'` o `'Entregado'`, **Then** la actualización persiste de inmediato en la base de datos SQLite.
 
 ---
@@ -114,7 +122,7 @@ El administrador puede:
 
 - **Intento de acceso al panel por usuario sin rol 'admin'**: Si un cliente intenta forzar el acceso al panel sin credenciales de administrador, el sistema debe denegar el acceso y redirigirlo a la Tienda o a la pantalla de login.
 - **Aprobación de orden sin comprobante adjunto**: Si una orden llega por una vía manual sin comprobante, el sistema debe alertar al administrador antes de permitir la aprobación, requiriendo confirmación expresa.
-- **Eliminación de producto vinculado a pedidos históricos**: Si se elimina un producto que ya tiene compras registradas en `order_items`, el sistema debe gestionar la eliminación en el catálogo activo sin romper la integridad referencial histórica del pedido.
+- **Eliminación de producto vinculado a pedidos históricos**: Si se elimina un producto que ya tiene compras registradas en `order_items`, el sistema lo da de baja del catálogo activo para compras futuras conservando íntegro su registro histórico en `order_items` con su nombre (`product_name`) y precio unitario (`unit_price`) congelados.
 - **Formato inválido en teléfonos de recaudación**: Si el administrador intenta guardar un número de Yape o Plin con menos o más de 9 dígitos numéricos, el formulario debe señalar el error de validación e impedir el guardado.
 - **Stock en cero (0 unidades)**: Si el stock de un suplemento llega a cero por compras sucesivas o edición manual, el producto debe exhibir una insignia destacada de "Agotado" tanto en el panel como en la tienda del cliente.
 
@@ -125,18 +133,18 @@ El administrador puede:
 ### Functional Requirements
 
 - **FR-001**: El sistema MUST proveer una vista de autenticación para el Panel de Administración accesible desde el botón persistente "Panel Admin" de la barra superior.
-- **FR-002**: La pantalla de login del panel MUST incluir un botón destacado 'Acceso Rápido Admin Demo (1 clic)' que autocomplete las credenciales `admin@fitstore.pe` / `admin123` y otorgue acceso inmediato.
+- **FR-002**: La pantalla de login del panel MUST incluir un botón destacado 'Acceso Rápido Admin Demo (1 clic)' que autocomplete las credenciales `admin@fitstore.pe` / `admin123` y otorgue acceso inmediato, persistiendo la sesión en `localStorage` para permitir alternar libremente con la tienda sin desconexiones accidentales.
 - **FR-003**: El Panel de Administración MUST exhibir en su pantalla principal un Dashboard con 4 indicadores financieros y operativos en tiempo real:
   1) Total Recaudado en Mis Cuentas en Soles (`S/ XX.XX`).
   2) Pagos Pendientes de Verificación con badge de notificación.
-  3) Total de Pedidos y Total de Productos con alerta de bajo stock (stock <= 5).
+  3) Total de Pedidos y Total de Productos con alerta de bajo stock ($\le 5$ unidades).
   4) Total de Clientes Registrados.
 - **FR-004**: El Panel MUST organizarse en 4 pestañas de gestión bien diferenciadas:
   - **Pestaña 1**: Catálogo de Productos y Precios.
   - **Pestaña 2**: Gestión de Pedidos y Verificación de Vouchers.
   - **Pestaña 3**: Gestión de Clientes.
   - **Pestaña 4**: Configurar Mis Cuentas Receptoras.
-- **FR-005**: En la **Pestaña 1 (Productos)**, el sistema MUST permitir listar productos en una tabla con buscador por nombre y filtro por categoría ('Proteínas', 'Creatinas', 'Pre-Entrenos', 'Accesorios').
+- **FR-005**: En la **Pestaña 1 (Productos)**, el sistema MUST permitir listar productos en una tabla con buscador por nombre y filtro por categoría ('Proteínas', 'Creatinas', 'Pre-Entrenos', 'Accesorios'), resaltando con badge "¡Bajo Stock!" los artículos con $\le 5$ unidades y con badge "Agotado" los que tengan 0 unidades.
 - **FR-006**: La Pestaña 1 MUST proveer modales interactivos para:
   - **Crear Producto**: Nombre, descripción, categoría, precio en Soles (`S/`), stock inicial (> 0), URL de imagen y flag de destacado.
   - **Editar Producto / Precio / Stock**: Modificar en caliente cualquier atributo, impactando inmediatamente en la tienda del cliente.
@@ -144,7 +152,7 @@ El administrador puede:
 - **FR-007**: En la **Pestaña 2 (Pedidos)**, el sistema MUST listar todas las órdenes registradas en SQLite mostrando: Código de Orden (`ORD-2026-XXX`), Fecha, Cliente (Nombre y DNI), Productos, Total en `S/`, Método de Pago, Cuenta Destino (`destination_account`), N° de Operación o Código de Autorización (`AUTH-XXXX`), Estado del Pago y Estado del Pedido.
 - **FR-008**: La Pestaña 2 MUST proveer un modal **'Ver Voucher / Comprobante'** que muestre la imagen del comprobante (`voucher_image` en Base64 o URL), la cuenta receptora del dueño a la que se transfirió (`destination_account`), y botones para **'Aprobar Abono en Mi Cuenta'** y **'Rechazar Comprobante'**.
 - **FR-009**: Al aprobar un abono, el sistema MUST actualizar en SQLite `payments.payment_status` a `'Aprobado'` y `orders.order_status` a `'Pagado / En Preparación'`.
-- **FR-010**: Al rechazar un comprobante, el sistema MUST actualizar en SQLite `payments.payment_status` a `'Rechazado'` y `orders.order_status` a `'Cancelado'`.
+- **FR-010**: Al rechazar un comprobante, el sistema MUST actualizar en SQLite `payments.payment_status` a `'Rechazado'`, `orders.order_status` a `'Cancelado'`, y restituir automáticamente las cantidades de cada producto del pedido a la tabla `products` para habilitar su venta inmediata.
 - **FR-011**: La Pestaña 2 MUST permitir modificar el estado logístico del pedido a través de un selector rápido para transicionar a `'Enviado'` o `'Entregado'`.
 - **FR-012**: En la **Pestaña 3 (Clientes)**, el sistema MUST listar los clientes con Nombre, DNI de 8 dígitos, Correo, Celular de 9 dígitos, Dirección, Ciudad, cantidad de compras y monto total gastado en Soles (`S/`).
 - **FR-013**: La Pestaña 3 MUST permitir registrar nuevos clientes manualmente y editar la información de clientes existentes en la tabla `users` de SQLite.
@@ -157,7 +165,7 @@ El administrador puede:
   - Código CCI (`bank_cci`)
   - WhatsApp de Notificaciones (`whatsapp_notification`)
 - **FR-015**: Al presionar 'Guardar Configuración de Cobro', el sistema MUST validar que los números celulares tengan 9 dígitos numéricos, persistir los cambios en `store_settings` y propagar de inmediato los nuevos datos al Checkout y Footer de la tienda pública sin requerir reinicio del servidor.
-- **FR-016**: La interfaz del Panel MUST incluir botones rápidos para regresar a la Tienda del Cliente y para cerrar la sesión administrativa de forma segura.
+- **FR-016**: La interfaz del Panel MUST incluir botones de navegación para regresar a la Tienda del Cliente en 1 clic y para cerrar la sesión administrativa de forma explícita, limpiando la persistencia en `localStorage`.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -183,3 +191,4 @@ El administrador puede:
 - Las credenciales por defecto del administrador demo son `admin@fitstore.pe` / `admin123`, precargadas durante el auto-seed inicial de SQLite.
 - Los cambios realizados en `store_settings` impactan en el registro único de configuración del negocio (`id = 1`).
 - La sesión administrativa se preserva en el almacenamiento local del navegador (`localStorage`) para mantener la sesión activa durante las demostraciones.
+
