@@ -79,3 +79,4 @@ Al enviar la petición `PUT /api/settings`, el backend actualiza la fila única 
 ### Razón
 - Cumple cabalmente con el Principio III y V de la Constitución.
 - Permite demostrar en vivo que cambiar el número de Yape o la cuenta bancaria en el panel admin impacta al segundo en lo que ve el comprador en el Checkout.
+

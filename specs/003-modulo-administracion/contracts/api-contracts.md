@@ -260,3 +260,4 @@ Retorna la lista de clientes enriquecida con pedidos acumulados y monto total ga
   }
 ]
 ```
+

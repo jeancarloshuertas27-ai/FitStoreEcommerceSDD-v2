@@ -148,3 +148,4 @@ Para la **Pestaña 3 (Gestión de Clientes)**, la API REST devuelve los usuarios
 | `city` | TEXT | `users.city` | Ciudad / Destino de entrega. |
 | `orders_count` | INTEGER | Agregación `COUNT(orders.id)` | Cantidad histórica de pedidos realizados. |
 | `total_spent` | REAL | Agregación `SUM(orders.total)` | Monto acumulado en Soles (`S/`) de pedidos no cancelados. |
+

@@ -90,3 +90,4 @@ npm run dev
    - *Resultado esperado*: Muestra mensaje de éxito instantáneo.
 4. Ve a la Tienda, agrega un suplemento y abre el Checkout:
    - *Resultado esperado*: La vista de Yape/BCP muestra de inmediato los datos actualizados para el cobro.
+
