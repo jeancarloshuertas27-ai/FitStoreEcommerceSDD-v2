@@ -25,6 +25,7 @@ export default function Header({
   setSearchQuery,
   sortBy,
   setSortBy,
+  pendingVerificationCount = 0,
 }) {
   const { totalItems, openCart } = useCart();
   const { currentUser } = useUser();
@@ -143,14 +144,23 @@ export default function Header({
                 )}
               </button>
 
-              {/* Acceso Rápido Admin 1-Clic */}
+              {/* Botón Acceso Panel Admin */}
               <button
-                onClick={() => setIsAdminModalOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-amber-400 hover:text-amber-300 border border-amber-500/30 hover:border-amber-500/60 text-xs font-bold transition-all"
-                title="Acceso rápido para demostración y verificación Admin"
+                onClick={() => setActiveTab('admin')}
+                className={`relative flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+                  activeTab === 'admin'
+                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/30'
+                    : 'bg-slate-800/80 hover:bg-slate-800 text-amber-400 hover:text-amber-300 border border-amber-500/30 hover:border-amber-500/60'
+                }`}
+                title="Acceso al Panel de Administración"
               >
-                <ShieldCheck className="w-4 h-4 text-amber-400" />
+                <ShieldCheck className="w-4 h-4" />
                 <span className="hidden sm:inline">Panel Admin</span>
+                {pendingVerificationCount > 0 && (
+                  <span className="bg-rose-500 text-white text-[10px] font-black rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center animate-pulse shadow">
+                    {pendingVerificationCount}
+                  </span>
+                )}
               </button>
             </div>
           </div>

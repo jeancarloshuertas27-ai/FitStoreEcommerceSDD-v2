@@ -38,6 +38,9 @@ export const api = {
     return request(`/products${qs}`);
   },
   getProductById: (id) => request(`/products/${id}`),
+  createProduct: (data) => request('/products', { method: 'POST', body: JSON.stringify(data) }),
+  updateProduct: (id, data) => request(`/products/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteProduct: (id) => request(`/products/${id}`, { method: 'DELETE' }),
 
   // Usuarios y Clientes
   getUsers: () => request('/users'),
@@ -50,6 +53,10 @@ export const api = {
   getAllOrders: () => request('/orders'),
   getOrderById: (id) => request(`/orders/${id}`),
   createOrder: (data) => request('/orders', { method: 'POST', body: JSON.stringify(data) }),
+  updateOrderStatus: (id, order_status) =>
+    request(`/orders/${id}/status`, { method: 'PUT', body: JSON.stringify({ order_status }) }),
+  updatePaymentStatus: (id, payment_status) =>
+    request(`/orders/${id}/payment`, { method: 'PUT', body: JSON.stringify({ payment_status }) }),
 };
 
 export default api;
