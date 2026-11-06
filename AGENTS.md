@@ -20,6 +20,7 @@ npm run dev
 - **Cobros Directos al Propietario**: Soporte para Vía 1 (Yape/Plin con QR, voucher/demo y N° op), Vía 2 (Transferencia a cuenta/CCI con botón copiar y N° op) y Vía 3 (Tarjeta Sandbox con código `AUTH-XXXX` y liquidación explícita a la cuenta del dueño).
 - **Verificabilidad**: Barra superior persistente para alternar entre Tienda, Perfil/Pedidos y Panel de Administración, con botón de acceso rápido Admin en 1 clic.
 - **Cierre de Feature**: Cuando te pida "cierra la feature", ejecuta: verificar el working tree y commitear los cambios pendientes; correr build de verificación (parar si falla); hacer checkout de main; fusionar la rama de la feature con --no-ff y el mensaje "Merge feature NNN: <nombre>"; borrar la rama local y remota correspondiente; subir main al remoto; y mostrar git log --oneline --graph -10.
+- **Cloudflare CLI**: When interacting with Cloudflare, use the cf CLI unless the project has a Wrangler configuration file.
 
 Las reglas de producto viven en .specify/memory/constitution.md y el estado del producto en specs/README.md
 
