@@ -6,6 +6,7 @@ import CartDrawer from './components/CartDrawer.jsx';
 import ProfileView from './components/ProfileView.jsx';
 import CheckoutModal from './components/CheckoutModal.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
+import FitBotModal from './components/FitBotModal.jsx';
 import { useUser } from './context/UserContext.jsx';
 import api from './services/api.js';
 import {
@@ -290,6 +291,12 @@ export default function App() {
           loadProducts();
           console.log('Orden completada exitosamente:', newOrder.order_code);
         }}
+      />
+
+      {/* Chatbot Asesor Deportivo Inteligente FitBot */}
+      <FitBotModal
+        products={products}
+        storeSettings={storeSettings}
       />
 
       {/* Footer de FitStore Pro */}
