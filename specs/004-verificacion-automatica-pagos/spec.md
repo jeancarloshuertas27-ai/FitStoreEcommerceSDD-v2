@@ -7,6 +7,17 @@
 
 ---
 
+## Clarifications
+
+### Session 2026-11-06
+- Q: ¿Cómo debe presentarse en la interfaz del checkout la elección entre el Código de Aprobación OTP de Yape (estilo Temu) y el escaneo tradicional de QR con N° de operación? → A: Pestañas conmutables dentro de Yape/Plin: Pestaña 1 "Código de Aprobación Yape (6 dígitos)" (predeterminada) y Pestaña 2 "Escanear QR + N° de Operación". Ambas modalidades disparan la verificación automática instantánea en 2.5s.
+- Q: ¿Qué valores exactos de estado deben asignarse en la base de datos a order_status y payment_status cuando un pago se verifica automáticamente? → A: Valores estándar order_status = 'Pagado / En Preparación' y payment_status = 'Aprobado', distinguiéndose en la interfaz con el badge '✓ Verificado Automáticamente' a partir del hash bancario único (YAPE-AUTO-, CIP-, AUTH-).
+- Q: ¿Cuál debe ser el plazo de vigencia del Código de Pago CIP para transferencias bancarias si el cliente no confirma el pago inmediatamente? → A: Plazo estándar de 24 horas con temporizador regresivo visible en el checkout y comprobante; si no se verifica el abono en dicho periodo, la orden y el CIP expiran automáticamente liberando el stock.
+- Q: ¿Qué reglas de validación debe aplicar el backend sobre el Código de Aprobación OTP de 6 dígitos para aprobar la compra en este entorno sin costos de APIs externas? → A: Validación realista antifraude: acepta cualquier código de 6 dígitos numéricos (/^\d{6}$/), rechaza secuencias o dígitos repetidos triviales (000000, 111111) y verifica estrictamente la no duplicidad en la tabla payments de SQLite.
+- Q: En el Panel de Administración, ¿qué acciones de gestión debe tener el Administrador disponibles sobre las órdenes verificadas automáticamente? → A: Flujo logístico completo: botones rápidos de despacho para avanzar a "Enviado" y "Entregado", acción secundaria de "Cancelar y Devolver Stock" con reversión atómica de unidades en SQLite y botón "Ver Auditoría" para consultar el comprobante y hash de transacción.
+
+---
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Verificación Automática e Instantánea de Yape y Plin (Priority: P1) 🎯 MVP
@@ -99,14 +110,14 @@ Como administrador de FitStore Pro, quiero que las compras realizadas por cualqu
 ### Functional Requirements
 
 - **FR-001**: El sistema DEBE ofrecer verificación automática e instantánea para los 3 métodos de cobro oficiales (Yape/Plin, Transferencia Bancaria y Tarjeta) sin requerir aprobación manual por parte del administrador.
-- **FR-002**: Para pagos con Yape y Plin, el sistema DEBE permitir el ingreso del número de celular (9 dígitos) y un Código de Aprobación dinámico de 6 dígitos (OTP) o número de operación bancaria, validando su estructura numérica.
+- **FR-002**: Para pagos con Yape y Plin, el sistema DEBE disponer de pestañas conmutables: Pestaña 1 "Código de Aprobación Yape (6 dígitos)" (predeterminada, requiriendo celular de 9 dígitos y código OTP de 6 dígitos) y Pestaña 2 "Escanear QR + N° de Operación" (con QR oficial y campo para N° de operación o voucher demo), verificando ambas automáticamente en 2.5s.
 - **FR-003**: Durante el procesamiento de Yape/Plin y Transferencia, la interfaz DEBE desplegar un modal interactivo con animación secuencial de progreso (2.5 segundos) reflejando conexión con la cámara de compensación, verificación de abono a nombre de Jeancarlos José Huertas Quichca y aprobación exitosa.
-- **FR-004**: El motor backend DEBE validar que ningún número de operación o código de aprobación haya sido utilizado previamente en la tabla de pagos para prevenir fraudes por reutilización de comprobantes.
+- **FR-004**: El motor backend DEBE validar que el código de aprobación de Yape contenga exactamente 6 dígitos numéricos (`/^\d{6}$/`), rechazar secuencias triviales (`000000`, `111111`) y verificar que ni el código ni el número de operación existan previamente en la tabla `payments` para prevenir fraudes por duplicidad.
 - **FR-005**: Ante una verificación exitosa, el sistema DEBE generar un hash/identificador único de transacción (ej. `YAPE-AUTO-XXXXXX` o `CIP-XXXXXX`), actualizar `payment_status` a `'Aprobado'`, cambiar `order_status` a `'Pagado / En Preparación'` y descontar el stock de los productos comprados de forma atómica en SQLite.
-- **FR-006**: Para transferencias bancarias, el sistema DEBE generar un código CIP unívoco vinculado al monto exacto de la orden en Soles (`S/`) y verificar automáticamente el abono a la cuenta BCP o CCI del propietario.
+- **FR-006**: Para transferencias bancarias, el sistema DEBE generar un código CIP unívoco vinculado al monto exacto de la orden en Soles (`S/`) con vigencia de 24 horas y temporizador visible, verificando automáticamente el abono a la cuenta BCP o CCI del propietario o cancelando la reserva si expira.
 - **FR-007**: Para pagos con tarjeta de crédito/débito, el sistema DEBE ejecutar validación algorítmica (Luhn, vigencia y CVV), generar un código de autorización `AUTH-XXXXXX` en un lapso máximo de 1.5 segundos y registrar la liquidación a la cuenta del dueño.
-- **FR-008**: El Panel de Administración DEBE categorizar automáticamente las órdenes aprobadas como `'Pagado / Verificado Automáticamente'`, incorporando de inmediato los fondos al indicador financiero de recaudación total del negocio.
-- **FR-009**: El Panel de Administración DEBE proveer un modal de auditoría por pedido donde se consulte el hash de verificación automática, el método utilizado, la cuenta de destino y la fecha y hora de conciliación.
+- **FR-008**: El Panel de Administración DEBE registrar en base de datos los estados estándar `order_status = 'Pagado / En Preparación'` y `payment_status = 'Aprobado'`, presentando en la interfaz la insignia `'✓ Verificado Automáticamente'` para todas aquellas órdenes con hash de conciliación automática, incorporando de inmediato los fondos al indicador de ventas recaudadas.
+- **FR-009**: El Panel de Administración DEBE proveer un modal de auditoría por pedido donde se consulte el hash de verificación automática, el método utilizado, la cuenta de destino y la fecha y hora de conciliación, así como botones de acción rápida para avanzar el estado a `'Enviado'` y `'Entregado'`, y la opción de cancelación con devolución atómica de stock en SQLite ante reclamos.
 - **FR-010**: El sistema DEBE operar con costo cero (\$0.00 en comisiones de pasarelas de terceros), utilizando el motor interno de validación algorítmica y conciliación directa a las cuentas del dueño de la tienda.
 
 ---
