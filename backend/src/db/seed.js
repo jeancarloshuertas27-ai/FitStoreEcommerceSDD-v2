@@ -81,6 +81,9 @@ export function initializeDatabase() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
     );
+
+    CREATE INDEX IF NOT EXISTS idx_payments_operation_number ON payments(operation_number);
+    CREATE INDEX IF NOT EXISTS idx_payments_auth_code ON payments(auth_code);
   `);
 
   // 2. Verificar si store_settings está sembrada

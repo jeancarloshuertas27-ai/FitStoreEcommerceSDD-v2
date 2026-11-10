@@ -1,11 +1,14 @@
 import { Router } from 'express';
 import db from '../db/database.js';
+import { expireOverdueCipOrders } from './payments.js';
 
 const router = Router();
 
 // GET /api/orders/user/:userId - Historial de pedidos de un cliente con sus items y pagos
 router.get('/user/:userId', (req, res) => {
   try {
+    expireOverdueCipOrders();
+
     const orders = db.prepare(`
       SELECT * FROM orders
       WHERE user_id = ?
@@ -41,6 +44,8 @@ router.get('/user/:userId', (req, res) => {
 // GET /api/orders/:id - Consulta de una orden específica con items y pago
 router.get('/:id', (req, res) => {
   try {
+    expireOverdueCipOrders();
+
     const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
     if (!order) {
       return res.status(404).json({ error: 'Pedido no encontrado' });
@@ -63,6 +68,8 @@ router.get('/:id', (req, res) => {
 // GET /api/orders - Listar todas las órdenes (para el panel admin)
 router.get('/', (req, res) => {
   try {
+    expireOverdueCipOrders();
+
     const orders = db.prepare('SELECT * FROM orders ORDER BY id DESC').all();
     const fullOrders = orders.map((order) => {
       const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
@@ -259,8 +266,8 @@ router.put('/:id/payment', (req, res) => {
       newOrderStatus = 'Pagado / En Preparación';
     } else if (payment_status === 'Rechazado') {
       newOrderStatus = 'Cancelado';
-      // Reversión atómica de stock solo si el pedido no estaba ya cancelado
-      if (order.order_status !== 'Cancelado') {
+      // Reversión atómica de stock solo si el pedido no estaba ya cancelado o expirado
+      if (order.order_status !== 'Cancelado' && order.order_status !== 'Expirado') {
         const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(id);
         const updateStock = db.prepare(`
           UPDATE products
@@ -306,6 +313,7 @@ router.put('/:id/status', (req, res) => {
       'Enviado',
       'Entregado',
       'Cancelado',
+      'Expirado',
     ];
 
     if (!order_status || !validStatuses.includes(order_status)) {
@@ -329,6 +337,71 @@ router.put('/:id/status', (req, res) => {
   } catch (error) {
     console.error('Error al actualizar estado del pedido:', error);
     res.status(500).json({ error: 'Error al actualizar estado del pedido en SQLite' });
+  }
+});
+
+// POST /api/orders/:id/cancel - Cancelación administrativa con reversión atómica de stock
+router.post('/:id/cancel', (req, res) => {
+  try {
+    expireOverdueCipOrders();
+
+    const { id } = req.params;
+
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+      if (!order) {
+        db.exec('ROLLBACK');
+        return res.status(404).json({
+          success: false,
+          error: 'Pedido no encontrado',
+        });
+      }
+
+      if (order.order_status === 'Cancelado' || order.order_status === 'Expirado') {
+        db.exec('ROLLBACK');
+        return res.status(409).json({
+          success: false,
+          error: `El pedido ya se encuentra en estado ${order.order_status} y no puede cancelarse nuevamente`,
+        });
+      }
+
+      db.prepare("UPDATE orders SET order_status = 'Cancelado' WHERE id = ?").run(id);
+      db.prepare("UPDATE payments SET payment_status = 'Rechazado' WHERE order_id = ?").run(id);
+
+      const items = db.prepare('SELECT product_id, quantity FROM order_items WHERE order_id = ?').all(id);
+      const restoreStock = db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?');
+      for (const item of items) {
+        if (item.product_id) {
+          restoreStock.run(item.quantity, item.product_id);
+        }
+      }
+
+      db.exec('COMMIT');
+
+      res.json({
+        success: true,
+        message: 'Orden cancelada exitosamente y stock de productos reintegrado al inventario.',
+        order_id: Number(id),
+        order_code: order.order_code,
+        order_status: 'Cancelado',
+        payment_status: 'Rechazado',
+        stock_restored: true,
+      });
+    } catch (txError) {
+      try {
+        db.exec('ROLLBACK');
+      } catch (_) {
+        // Ignorar si no hay transacción activa
+      }
+      throw txError;
+    }
+  } catch (error) {
+    console.error('Error al cancelar pedido:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error al cancelar la orden en SQLite',
+    });
   }
 });
 

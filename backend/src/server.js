@@ -5,6 +5,7 @@ import settingsRouter from './routes/settings.js';
 import productsRouter from './routes/products.js';
 import usersRouter from './routes/users.js';
 import ordersRouter from './routes/orders.js';
+import paymentsRouter from './routes/payments.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -40,6 +41,7 @@ app.use('/api/settings', settingsRouter);
 app.use('/api/products', productsRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/orders', ordersRouter);
+app.use('/api/payments', paymentsRouter);
 
 // 5. Manejador global de errores
 app.use((err, req, res, next) => {

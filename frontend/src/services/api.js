@@ -14,7 +14,11 @@ async function request(endpoint, options = {}) {
     const response = await fetch(url, config);
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.error || 'Error en la petición al servidor');
+      const err = new Error(data.message || data.error || 'Error en la petición al servidor');
+      err.code = data.error || null;
+      err.status = response.status;
+      err.data = data;
+      throw err;
     }
     return data;
   } catch (error) {
@@ -57,6 +61,11 @@ export const api = {
     request(`/orders/${id}/status`, { method: 'PUT', body: JSON.stringify({ order_status }) }),
   updatePaymentStatus: (id, payment_status) =>
     request(`/orders/${id}/payment`, { method: 'PUT', body: JSON.stringify({ payment_status }) }),
+
+  // Verificación Automática de Pagos (Feature 004)
+  autoVerifyPayment: (data) => request('/payments/auto-verify', { method: 'POST', body: JSON.stringify(data) }),
+  getPaymentAudit: (orderCode) => request(`/payments/audit/${orderCode}`),
+  cancelOrder: (id) => request(`/orders/${id}/cancel`, { method: 'POST' }),
 };
 
 export default api;
