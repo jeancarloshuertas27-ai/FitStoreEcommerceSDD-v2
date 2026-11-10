@@ -23,7 +23,7 @@ description: "Lista de tareas para la implementación del Módulo 004: Motor de 
 
 **Purpose**: Creación de módulos base de rutas de verificación en backend, utilidades algorítmicas y componente modal animado en frontend.
 
-- [ ] T001 Crear utilidades compartidas de validación financiera (algoritmo de Luhn módulo 10, regex celular peruano `/^\d{9}$/`, código OTP Yape `/^\d{6}$/` rechazando secuencias triviales `000000`/`111111`, generadores de hash `YAPE-AUTO-XXXXXX`, `CIP-2026-XXXXXX`, `AUTH-XXXXXX`) en `backend/src/utils/paymentValidators.js`
+- [ ] T001 Crear utilidades compartidas de validación financiera (algoritmo de Luhn módulo 10, regex celular peruano `/^\d{9}$/`, código OTP Yape `/^\d{6}$/` rechazando secuencias triviales `000000`/`111111`, generadores de referencia `CIP-2026-XXXXXX` y hashes de auditoría `YAPE-AUTO-XXXXXX`, `CIP-AUTO-XXXXXX`, `AUTH-XXXXXX`) en `backend/src/utils/paymentValidators.js`
 - [ ] T002 [P] Crear la estructura inicial del router de pagos automáticos en `backend/src/routes/payments.js` y montarlo bajo `/api/payments` en `backend/src/server.js`
 - [ ] T003 [P] Crear la estructura base del modal animado de verificación en tiempo real (3 fases secuenciales con indicador visual estilo Temu/Shein) en `frontend/src/components/AutoVerifyModal.jsx`
 
@@ -36,8 +36,8 @@ description: "Lista de tareas para la implementación del Módulo 004: Motor de 
 > **CRITICAL**: Esta fase debe completarse antes de iniciar las historias de usuario específicas.
 
 - [ ] T004 Verificar e indexar la consulta de unicidad en la tabla `payments` (verificando que `operation_number` y `auth_code` no existan en estado `'Aprobado'`, devolviendo HTTP `409 Conflict` con error `'DUPLICATE_OPERATION'`) dentro de `backend/src/routes/payments.js` y asegurar soporte de columnas/índices en `backend/src/db/seed.js`
-- [ ] T005 Implementar la función transaccional atómica de aprobación de orden en `backend/src/routes/payments.js` (inserción en `orders` con `order_status = 'Pagado / En Preparación'`, `order_items`, `payments` con `payment_status = 'Aprobado'` y descuento atómico de stock en `products` verificando existencias `>= quantity` antes de aprobar)
-- [ ] T006 [P] Añadir los métodos `autoVerifyPayment(payload)`, `getPaymentAudit(orderCode)` y `cancelOrder(orderId)` en `frontend/src/services/api.js` conservando mensajes de error del servidor (`error`, `message`, código HTTP)
+- [ ] T005 Implementar la función transaccional atómica (`BEGIN IMMEDIATE` ... `COMMIT` / `ROLLBACK` en `node:sqlite`) en `backend/src/routes/payments.js`: resolver `user_id` (`NOT NULL` en `orders`, buscando por `user_id`, `customer.dni` o cliente demo), validar existencias `stock >= quantity` (retornando HTTP `409 INSUFFICIENT_STOCK` si falta stock), insertar en `orders` (`'Pagado / En Preparación'`), `order_items`, `payments` (`'Aprobado'`) y descontar stock en `products`
+- [ ] T006 [P] Añadir los métodos `autoVerifyPayment(payload)`, `getPaymentAudit(orderCode)` y `cancelOrder(orderId)` en `frontend/src/services/api.js` conservando mensajes de error y `error` code del servidor (`400`, `409`, `410`)
 
 **Checkpoint**: Fundación lista: el backend soporta verificación atómica con control anti-duplicados y el frontend posee los adaptadores REST.
 
@@ -67,9 +67,9 @@ description: "Lista de tareas para la implementación del Módulo 004: Motor de 
 
 ### Implementation for User Story 2
 
-- [ ] T010 [US2] Implementar en `backend/src/routes/payments.js` la lógica para `method === 'bank_transfer'` dentro de `POST /api/payments/auto-verify`, validando el código `CIP-2026-XXXXXX`, el número de operación interbancaria sin duplicados en `payments`, la concordancia exacta del `total` en `PEN`, registrando la cuenta BCP/CCI de `store_settings` en `destination_account` y generando `auth_code` con formato `CIP-AUTO-XXXXXX`
+- [ ] T010 [US2] Implementar en `backend/src/routes/payments.js` la lógica para `method === 'bank_transfer'` dentro de `POST /api/payments/auto-verify`: soportar `action: 'reserve_cip'` (orden `'Pendiente de Pago'`, pago `'Pendiente (CIP 24h)'` con `CIP-2026-XXXXXX` reservando stock) y `action: 'verify'` (validando referencia CIP, N° operación bancaria único, monto exacto `total` en `PEN`, cuenta BCP/CCI de `store_settings`, emitiendo `auth_code = 'CIP-AUTO-XXXXXX'`), más la función `expireOverdueCipOrders()` que expira órdenes CIP > 24h (`order_status = 'Expirado'`, `payment_status = 'Expirado'`, liberando stock y devolviendo HTTP `410 CIP_EXPIRED`)
 - [ ] T011 [P] [US2] Implementar el generador de código CIP determinista por sesión (`CIP-2026-XXXXXX`) y un temporizador regresivo en vivo de 24 horas (formato `HH:MM:SS`) dentro de `frontend/src/components/CheckoutModal.jsx` junto a los botones rápidos de copia para Cuenta BCP y CCI
-- [ ] T012 [US2] Conectar la confirmación de Transferencia Bancaria en `frontend/src/components/CheckoutModal.jsx` con `AutoVerifyModal.jsx` (adaptando los textos de compensación al canal interbancario CCI/BCP del propietario en `< 2.0s`) para aprobar automáticamente y desplegar la boleta pagada
+- [ ] T012 [US2] Conectar la confirmación de Transferencia Bancaria en `frontend/src/components/CheckoutModal.jsx` con `AutoVerifyModal.jsx` (adaptando los textos de compensación al canal interbancario CCI/BCP del propietario en `< 2.0s` para aprobar al instante, o permitiendo generar la reserva CIP de 24h para confirmar luego desde la boleta)
 
 **Checkpoint**: Las transferencias directas Banco a Banco / CCI operan con código CIP de 24h y conciliación automática sin intervención manual.
 
@@ -100,7 +100,7 @@ description: "Lista de tareas para la implementación del Módulo 004: Motor de 
 ### Implementation for User Story 4
 
 - [ ] T016 [P] [US4] Implementar el endpoint `GET /api/payments/audit/:orderCode` en `backend/src/routes/payments.js` retornando el detalle de conciliación automática (hash, canal, cuenta de destino del titular, monto, fecha/hora e ítems)
-- [ ] T017 [P] [US4] Implementar el endpoint `POST /api/orders/:id/cancel` en `backend/src/routes/orders.js` para cambiar `order_status = 'Cancelado'` y `payment_status = 'Rechazado'` de forma transaccional, devolviendo atómicamente cada `item.quantity` al `stock` de `products` en SQLite siempre que la orden no estuviera previamente cancelada
+- [ ] T017 [P] [US4] Implementar el endpoint `POST /api/orders/:id/cancel` en `backend/src/routes/orders.js` (y añadir `'Expirado'` a `validStatuses` más la invocación de `expireOverdueCipOrders()` en `GET /api/orders` y `GET /api/orders/user/:userId`) para cambiar `order_status = 'Cancelado'` y `payment_status = 'Rechazado'` de forma transaccional (`BEGIN IMMEDIATE` ... `COMMIT`), devolviendo atómicamente cada `item.quantity` al `stock` de `products` en SQLite siempre que la orden no estuviera ya cancelada o expirada
 - [ ] T018 [US4] Actualizar `frontend/src/components/AdminPanel.jsx` para renderizar el badge verde `'✓ Verificado Automáticamente'` en las órdenes con hash automático (`YAPE-AUTO-`, `CIP-AUTO-`, `AUTH-`), agregar el modal de inspección de auditoría conectado a `api.getPaymentAudit()` y añadir el botón de `'Cancelar y Devolver Stock'` conectado a `api.cancelOrder()` junto a los botones de despacho rápido `'Enviado'` y `'Entregado'`
 
 **Checkpoint**: El Panel de Administración opera 100% automatizado en cobros con trazabilidad financiera completa y control operativo logístico.
@@ -111,7 +111,7 @@ description: "Lista de tareas para la implementación del Módulo 004: Motor de 
 
 **Purpose**: Ajustes transversales en boleta electrónica, validación de compilación y pruebas integrales del quickstart.
 
-- [ ] T019 [P] Actualizar `frontend/src/components/ElectronicReceipt.jsx` para exhibir el badge de `'✓ Verificado Automáticamente'`, el código/hash bancario de auditoría (`YAPE-AUTO-`, `CIP-AUTO-`, `AUTH-`) y los datos del código CIP de 24h cuando aplique
+- [ ] T019 [P] Actualizar `frontend/src/components/ElectronicReceipt.jsx` para exhibir el badge `'✓ Verificado Automáticamente'`, el código/hash bancario de auditoría (`YAPE-AUTO-`, `CIP-AUTO-`, `AUTH-`), y para reservas CIP pendientes (`'Pendiente (CIP 24h)'`) el temporizador regresivo de 24h con acceso para verificar el abono vía `AutoVerifyModal`
 - [ ] T020 Ejecutar compilación de producción con `npm run build` garantizando cero errores de sintaxis, empaquetado o JSX en `frontend` y verificar carga limpia de rutas en `backend`
 - [ ] T021 Ejecutar prueba completa de los 6 escenarios de verificación end-to-end documentados en `specs/004-verificacion-automatica-pagos/quickstart.md` (Yape OTP 2.5s, rechazo anti-duplicados `409`, CIP 24h, Tarjeta Luhn, Auditoría Admin y Reversión de stock)
 

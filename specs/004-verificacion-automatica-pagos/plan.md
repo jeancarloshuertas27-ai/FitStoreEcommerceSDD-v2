@@ -31,7 +31,7 @@ Reemplazar el flujo de revisión manual de comprobantes por un Motor de Concilia
 |-----------|--------|---------------|
 | **I. Arquitectura Full-Stack Unificada** | **PASS** | Frontend en React + Vite + Tailwind + Lucide Icons; backend en Express REST bajo `/api`; SQLite local `database.sqlite` sin dependencias externas. |
 | **II. Base de Datos SQLite Autoinicializada** | **PASS** | Opera sobre las 6 tablas existentes (`users`, `products`, `orders`, `order_items`, `payments`, `store_settings`) sin romper el esquema ni el auto-seed. |
-| **III. Pagos Dirigidos a Cuentas Reales del Propietario** | **PASS** | Todos los cobros verificados se canalizan y acreditan a las cuentas oficiales de Jeancarlos José Huertas Quichca (Yape `924046690`, Plin `983064501`, BCP `22079349234041`, CCI `00222017934923404128`). |
+| **III. Pagos Dirigidos a Cuentas Reales del Propietario** | **PASS** | Todos los cobros verificados se canalizan y acreditan a las cuentas oficiales de Jeancarlos José Huertas Quichca (Yape `924046690`, Plin `983064501`, BCP `22079349234041`, CCI `00222017934923404128`). *Nota*: El código de autorización de tarjeta extiende el formato base `AUTH-XXXX` a 6 caracteres (`AUTH-XXXXXX`) por homogeneidad con `YAPE-AUTO-XXXXXX` y `CIP-AUTO-XXXXXX`. |
 | **IV. Idioma, Localización y Validación para el Perú** | **PASS** | Interfaz y modal animado en español peruano, moneda en Soles (`S/`), validación de celular (9 dígitos) y DNI (8 dígitos). |
 | **V. Verificabilidad sin Bloqueos y Experiencia Ágil** | **PASS** | Barra superior persistente, acceso rápido Admin en 1 clic y auditoría completa de hashes bancarios en el Panel de Administración. |
 
@@ -82,8 +82,8 @@ frontend/
 ### Fase 1: Backend - Endpoint de Verificación y Control Antifraude
 1. Crear `backend/src/routes/payments.js` con el endpoint `POST /api/payments/auto-verify`.
 2. Implementar la validación de unicidad en SQLite (comprobación de `operation_number` y `auth_code` en `payments`).
-3. Implementar la transacción atómica: inserción de `orders`, `order_items`, `payments` con hash bancario (`YAPE-AUTO-`, `CIP-`, `AUTH-`) y deducción de stock en `products`.
-4. Implementar el endpoint `POST /api/orders/:id/cancel` en `backend/src/routes/orders.js` para reversión de inventario.
+3. Implementar la transacción atómica (`BEGIN IMMEDIATE` ... `COMMIT`/`ROLLBACK` en `node:sqlite`): inserción/actualización de `orders`, `order_items`, `payments` con hash bancario (`YAPE-AUTO-XXXXXX`, `CIP-AUTO-XXXXXX`, `AUTH-XXXXXX`), deducción de stock en `products` y expiración automática de reservas CIP mayores a 24 horas (`order_status = 'Expirado'`, liberando stock).
+4. Implementar el endpoint `POST /api/orders/:id/cancel` y soporte del estado `'Expirado'` en `backend/src/routes/orders.js` para reversión de inventario.
 5. Registrar las rutas en `backend/src/server.js`.
 
 ### Fase 2: Frontend - Modal Animado de Verificación en Tiempo Real (Estilo Temu/Shein)

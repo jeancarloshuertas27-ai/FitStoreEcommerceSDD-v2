@@ -21,7 +21,10 @@ Content-Type: application/json
 ```json
 {
   "method": "yape_plin",
+  "action": "verify",
   "verification_mode": "otp",
+  "user_id": 2,
+  "order_id": null,
   "phone": "987654321",
   "otp_code": "492104",
   "items": [
@@ -43,6 +46,7 @@ Content-Type: application/json
   "total": 189.90
 }
 ```
+> *Nota*: Para Transferencia Bancaria (`method: "bank_transfer"`), enviar `action: "reserve_cip"` crea una reserva pendiente con código `CIP-2026-XXXXXX` (vigencia 24h) y descuenta temporalmente el stock; al enviar `action: "verify"` con `cip_code` y `operation_number` (incluyendo `order_id` si venía de reserva) se verifica y aprueba emitiendo `auth_code: "CIP-AUTO-XXXXXX"`. Si han pasado más de 24 horas desde la reserva, el servidor marca la orden como `'Expirado'`, libera el stock y responde HTTP `410`.
 
 #### Response 201 Created (Éxito)
 ```json
@@ -83,6 +87,24 @@ Content-Type: application/json
   "success": false,
   "error": "DUPLICATE_OPERATION",
   "message": "Esta operación o código de aprobación ya fue procesado y acreditado previamente. Por favor ingresa el código de tu abono actual."
+}
+```
+
+#### Response 409 Conflict (Stock Insuficiente)
+```json
+{
+  "success": false,
+  "error": "INSUFFICIENT_STOCK",
+  "message": "Stock insuficiente para completar la compra del producto seleccionado. No se realizó ningún cobro."
+}
+```
+
+#### Response 410 Gone (Código CIP Expirado > 24 horas)
+```json
+{
+  "success": false,
+  "error": "CIP_EXPIRED",
+  "message": "El plazo de 24 horas de tu código CIP ha expirado. La reserva fue cancelada y el stock liberado."
 }
 ```
 

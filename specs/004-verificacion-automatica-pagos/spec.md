@@ -11,7 +11,7 @@
 
 ### Session 2026-11-06
 - Q: ¿Cómo debe presentarse en la interfaz del checkout la elección entre el Código de Aprobación OTP de Yape (estilo Temu) y el escaneo tradicional de QR con N° de operación? → A: Pestañas conmutables dentro de Yape/Plin: Pestaña 1 "Código de Aprobación Yape (6 dígitos)" (predeterminada) y Pestaña 2 "Escanear QR + N° de Operación". Ambas modalidades disparan la verificación automática instantánea en 2.5s.
-- Q: ¿Qué valores exactos de estado deben asignarse en la base de datos a order_status y payment_status cuando un pago se verifica automáticamente? → A: Valores estándar order_status = 'Pagado / En Preparación' y payment_status = 'Aprobado', distinguiéndose en la interfaz con el badge '✓ Verificado Automáticamente' a partir del hash bancario único (YAPE-AUTO-, CIP-, AUTH-).
+- Q: ¿Qué valores exactos de estado deben asignarse en la base de datos a order_status y payment_status cuando un pago se verifica automáticamente? → A: Valores estándar order_status = 'Pagado / En Preparación' y payment_status = 'Aprobado', distinguiéndose en la interfaz con el badge '✓ Verificado Automáticamente' a partir del hash bancario único (`YAPE-AUTO-XXXXXX`, `CIP-AUTO-XXXXXX`, `AUTH-XXXXXX`).
 - Q: ¿Cuál debe ser el plazo de vigencia del Código de Pago CIP para transferencias bancarias si el cliente no confirma el pago inmediatamente? → A: Plazo estándar de 24 horas con temporizador regresivo visible en el checkout y comprobante; si no se verifica el abono en dicho periodo, la orden y el CIP expiran automáticamente liberando el stock.
 - Q: ¿Qué reglas de validación debe aplicar el backend sobre el Código de Aprobación OTP de 6 dígitos para aprobar la compra en este entorno sin costos de APIs externas? → A: Validación realista antifraude: acepta cualquier código de 6 dígitos numéricos (/^\d{6}$/), rechaza secuencias o dígitos repetidos triviales (000000, 111111) y verifica estrictamente la no duplicidad en la tabla payments de SQLite.
 - Q: En el Panel de Administración, ¿qué acciones de gestión debe tener el Administrador disponibles sobre las órdenes verificadas automáticamente? → A: Flujo logístico completo: botones rápidos de despacho para avanzar a "Enviado" y "Entregado", acción secundaria de "Cancelar y Devolver Stock" con reversión atómica de unidades en SQLite y botón "Ver Auditoría" para consultar el comprobante y hash de transacción.
@@ -53,10 +53,10 @@ Como comprador que prefiere transferir directamente desde su banca por internet 
 **Acceptance Scenarios**:
 1. **Given** un comprador en el checkout que selecciona "Transferencia Bancaria a Cuenta del Propietario",  
    **When** se inicializa el método de pago,  
-   **Then** el sistema muestra los datos bancarios del dueño (BCP Soles `22079349234041`, CCI `00222017934923404128`, Titular `Jeancarlos José Huertas Quichca`) y genera un código CIP correlativo único (ej. `CIP-2026-XXXX`) asociado al monto exacto de la orden en Soles (`S/`).
+   **Then** el sistema muestra los datos bancarios del dueño (BCP Soles `22079349234041`, CCI `00222017934923404128`, Titular `Jeancarlos José Huertas Quichca`) y genera un código CIP correlativo único (`CIP-2026-XXXXXX`) asociado al monto exacto de la orden en Soles (`S/`).
 2. **Given** el código CIP asignado y el número de operación ingresado por el comprador,  
    **When** el comprador hace clic en "Verificar Abono Bancario",  
-   **Then** el motor de verificación valida la concordancia del monto y la operación bancaria, aprueba la orden automáticamente (`order_status = 'Pagado / En Preparación'`, `payment_status = 'Aprobado'`) y genera la boleta electrónica sin intervención humana.
+   **Then** el motor de verificación valida la concordancia del monto y la operación bancaria, aprueba la orden automáticamente (`order_status = 'Pagado / En Preparación'`, `payment_status = 'Aprobado'`, hash `CIP-AUTO-XXXXXX`) y genera la boleta electrónica sin intervención humana.
 
 ---
 
@@ -80,26 +80,26 @@ Como comprador con tarjeta de débito o crédito bancaria, quiero ingresar los d
 
 ### User Story 4 - Auditoría y Automatización en el Panel de Administración (Priority: P4)
 
-Como administrador de FitStore Pro, quiero que las compras realizadas por cualquiera de los 3 métodos ingresen directamente con el estado "Pagado / Verificado Automáticamente" y sumen de inmediato al "Total Recaudado en Mis Cuentas", para que ya no tenga que verificar vouchers manualmente y pueda enfocarme 100% en despachar y enviar los pedidos.
+Como administrador de FitStore Pro, quiero que las compras realizadas por cualquiera de los 3 métodos ingresen directamente en estado `'Pagado / En Preparación'` identificadas visualmente con la insignia `'✓ Verificado Automáticamente'` y sumen de inmediato al "Total Recaudado en Mis Cuentas", para que ya no tenga que verificar vouchers manualmente y pueda enfocarme 100% en despachar y enviar los pedidos.
 
 **Why this priority**: Automatiza por completo la carga de trabajo administrativa del dueño de la tienda, reduciendo el tiempo de despacho y manteniendo trazabilidad mediante botones de auditoría transparente.
 
-**Independent Test**: Ingresar al Panel de Administración tras procesar compras automáticas y verificar que el contador de pedidos pendientes de verificación esté en 0, que las nuevas órdenes figuren como "Pagado / Verificado Automáticamente" con su hash bancario visible al hacer clic en "Ver Auditoría", y que los botones de acción se enfoquen en "Marcar como Enviado" y "Marcar como Entregado".
+**Independent Test**: Ingresar al Panel de Administración tras procesar compras automáticas y verificar que el contador de pedidos pendientes de verificación esté en 0, que las nuevas órdenes figuren en estado `'Pagado / En Preparación'` con la insignia `'✓ Verificado Automáticamente'` y su hash bancario visible al hacer clic en "Ver Auditoría", y que los botones de acción se enfoquen en "Marcar como Enviado", "Marcar como Entregado" o "Cancelar y Devolver Stock".
 
 **Acceptance Scenarios**:
 1. **Given** órdenes completadas a través del motor de verificación automática,  
    **When** el administrador inicia sesión y accede al Panel de Administración,  
-   **Then** los pedidos aparecen identificados con la etiqueta verde `'Pagado / Verificado Automáticamente'`, el balance de ventas recaudadas refleja de inmediato los fondos, y la lista de pendientes de revisión manual está vacía.
+   **Then** los pedidos aparecen en estado `'Pagado / En Preparación'` identificados con la insignia verde `'✓ Verificado Automáticamente'`, el balance de ventas recaudadas refleja de inmediato los fondos, y la lista de pendientes de revisión manual está vacía.
 2. **Given** un pedido verificado automáticamente en la lista de gestión,  
    **When** el administrador presiona el botón "Ver Auditoría / Comprobante",  
-   **Then** se despliega una ventana modal con los detalles de conciliación automática: método de cobro, hash bancario (`YAPE-AUTO-XXXXXX` o código de autorización), cuenta de destino del propietario, fecha, hora exacta y desglose de suplementos listos para empaquetar.
+   **Then** se despliega una ventana modal con los detalles de conciliación automática: método de cobro, hash bancario (`YAPE-AUTO-XXXXXX`, `CIP-AUTO-XXXXXX` o `AUTH-XXXXXX`), cuenta de destino del propietario, fecha, hora exacta y desglose de suplementos listos para empaquetar.
 
 ---
 
 ### Edge Cases
 
 - **Operación duplicada**: Si un usuario malintencionado intenta reutilizar un número de operación bancaria o código de aprobación ya empleado en otra orden aprobada, el backend rechaza la solicitud indicando: `"Esta operación ya fue procesada y acreditada previamente. Por favor ingresa el código de tu abono actual."`
-- **Caída o desconexión de red durante los 2.5s de animación**: Si la conexión del cliente se interrumpe durante el modal animado, el backend mantiene la atomicidad de la transacción: o se aprueba y descuenta stock completamente, o se revierte cleanly sin crear estados inconsistentes.
+- **Caída o desconexión de red durante los 2.5s de animación**: Si la conexión del cliente se interrumpe durante el modal animado, el backend mantiene la atomicidad de la transacción: o se aprueba y descuenta stock completamente, o se revierte de forma limpia sin crear estados inconsistentes.
 - **Stock insuficiente en el momento de la confirmación**: Si otro usuario adquirió la última unidad de un suplemento mientras el cliente completaba los datos de pago, el validador detecta la falta de inventario antes de generar el hash bancario, evitando cobros indebidos.
 - **Formato inválido de código OTP**: Si el cliente ingresa un código de aprobación de Yape de longitud distinta a 6 dígitos o con caracteres alfabéticos, el frontend y backend notifican de inmediato que el código debe contener exactamente 6 dígitos numéricos.
 
@@ -113,8 +113,8 @@ Como administrador de FitStore Pro, quiero que las compras realizadas por cualqu
 - **FR-002**: Para pagos con Yape y Plin, el sistema DEBE disponer de pestañas conmutables: Pestaña 1 "Código de Aprobación Yape (6 dígitos)" (predeterminada, requiriendo celular de 9 dígitos y código OTP de 6 dígitos) y Pestaña 2 "Escanear QR + N° de Operación" (con QR oficial y campo para N° de operación o voucher demo), verificando ambas automáticamente en 2.5s.
 - **FR-003**: Durante el procesamiento de Yape/Plin y Transferencia, la interfaz DEBE desplegar un modal interactivo con animación secuencial de progreso (2.5 segundos) reflejando conexión con la cámara de compensación, verificación de abono a nombre de Jeancarlos José Huertas Quichca y aprobación exitosa.
 - **FR-004**: El motor backend DEBE validar que el código de aprobación de Yape contenga exactamente 6 dígitos numéricos (`/^\d{6}$/`), rechazar secuencias triviales (`000000`, `111111`) y verificar que ni el código ni el número de operación existan previamente en la tabla `payments` para prevenir fraudes por duplicidad.
-- **FR-005**: Ante una verificación exitosa, el sistema DEBE generar un hash/identificador único de transacción (ej. `YAPE-AUTO-XXXXXX` o `CIP-XXXXXX`), actualizar `payment_status` a `'Aprobado'`, cambiar `order_status` a `'Pagado / En Preparación'` y descontar el stock de los productos comprados de forma atómica en SQLite.
-- **FR-006**: Para transferencias bancarias, el sistema DEBE generar un código CIP unívoco vinculado al monto exacto de la orden en Soles (`S/`) con vigencia de 24 horas y temporizador visible, verificando automáticamente el abono a la cuenta BCP o CCI del propietario o cancelando la reserva si expira.
+- **FR-005**: Ante una verificación exitosa, el sistema DEBE generar un hash/identificador único de transacción (`YAPE-AUTO-XXXXXX`, `CIP-AUTO-XXXXXX` o `AUTH-XXXXXX`), actualizar `payment_status` a `'Aprobado'`, cambiar `order_status` a `'Pagado / En Preparación'` y descontar el stock de los productos comprados de forma atómica en SQLite.
+- **FR-006**: Para transferencias bancarias, el sistema DEBE generar un código de referencia CIP unívoco (`CIP-2026-XXXXXX`) vinculado al monto exacto de la orden en Soles (`S/`) con vigencia de 24 horas y temporizador visible, permitiendo tanto la verificación inmediata del abono a la cuenta BCP o CCI del propietario (emitiendo `CIP-AUTO-XXXXXX`) como la reserva temporal CIP cuyo vencimiento > 24h pasa automáticamente a `'Expirado'` liberando el stock.
 - **FR-007**: Para pagos con tarjeta de crédito/débito, el sistema DEBE ejecutar validación algorítmica (Luhn, vigencia y CVV), generar un código de autorización `AUTH-XXXXXX` en un lapso máximo de 1.5 segundos y registrar la liquidación a la cuenta del dueño.
 - **FR-008**: El Panel de Administración DEBE registrar en base de datos los estados estándar `order_status = 'Pagado / En Preparación'` y `payment_status = 'Aprobado'`, presentando en la interfaz la insignia `'✓ Verificado Automáticamente'` para todas aquellas órdenes con hash de conciliación automática, incorporando de inmediato los fondos al indicador de ventas recaudadas.
 - **FR-009**: El Panel de Administración DEBE proveer un modal de auditoría por pedido donde se consulte el hash de verificación automática, el método utilizado, la cuenta de destino y la fecha y hora de conciliación, así como botones de acción rápida para avanzar el estado a `'Enviado'` y `'Entregado'`, y la opción de cancelación con devolución atómica de stock en SQLite ante reclamos.

@@ -22,13 +22,13 @@ erDiagram
     ORDERS {
         integer id PK
         string order_code UK
-        integer user_id FK
+        integer user_id FK "NOT NULL: resuelto desde usuario activo, DNI o cliente por defecto"
         string customer_name
         string customer_dni
         string customer_phone
         string shipping_address
         real total
-        string order_status "Pagado / En Preparación | Enviado | Entregado | Cancelado"
+        string order_status "Pendiente de Pago | Pagado / En Preparación | Enviado | Entregado | Cancelado | Expirado"
         datetime created_at
     }
 
@@ -39,11 +39,11 @@ erDiagram
         string destination_account "Cuenta oficial del dueño en store_settings"
         real amount
         string currency "PEN"
-        string operation_number "OTP 6 dígitos o N° Operación bancaria"
+        string operation_number "OTP 6 dígitos, CIP-2026-XXXXXX o N° Operación bancaria"
         string voucher_image "URL o Base64 del comprobante"
         string card_last4 "Últimos 4 dígitos si aplica"
-        string auth_code "Hash único: YAPE-AUTO-XXXXXX | CIP-AUTO-XXXXXX | AUTH-XXXXXX"
-        string payment_status "Aprobado"
+        string auth_code "Hash único: YAPE-AUTO-XXXXXX | CIP-AUTO-XXXXXX | AUTH-XXXXXX (o CIP-2026-XXXXXX si reserva pendiente)"
+        string payment_status "Pendiente (CIP 24h) | Aprobado | Rechazado | Expirado"
         datetime created_at
     }
 ```
@@ -58,7 +58,10 @@ Enviado desde el frontend al endpoint `POST /api/payments/auto-verify`:
 ```json
 {
   "method": "yape_plin",
+  "action": "verify",
   "verification_mode": "otp",
+  "user_id": 2,
+  "order_id": null,
   "phone": "987654321",
   "otp_code": "492104",
   "operation_number": null,
@@ -138,9 +141,15 @@ stateDiagram-v2
     }
 
     VerificandoEnVivo --> ErrorDuplicado : Código u Operación ya registrada (409)
+    VerificandoEnVivo --> ErrorStock : Stock insuficiente al confirmar (409)
     VerificandoEnVivo --> ErrorFormato : OTP != 6 dígitos o Luhn inválido (400)
     ErrorDuplicado --> CheckoutPaso2 : Permite corregir sin recargar
+    ErrorStock --> CheckoutPaso2 : Informa disponibilidad real
     ErrorFormato --> CheckoutPaso2 : Permite corregir sin recargar
+
+    CheckoutPaso2 --> ReservaCIP24h : Generar CIP para pagar luego
+    ReservaCIP24h --> VerificandoEnVivo : Confirma abono dentro de 24h
+    ReservaCIP24h --> ExpiradoRevertido : Vence plazo > 24h y libera stock
 
     VerificandoEnVivo --> PagadoEnPreparacion : Transacción Atómica Exitosa
     
@@ -155,8 +164,10 @@ stateDiagram-v2
 
 ## 4. Reglas de Negocio y Validación de Entidades
 1. **Unicidad de Operación**: La tabla `payments` valida que no exista ningún registro previo con el mismo `operation_number` o `auth_code` en estado `'Aprobado'`.
-2. **Formato Numérico**:
+2. **Formato Numérico y Hashes de Auditoría**:
    - Celular Yape/Plin: Exactamente 9 dígitos numéricos (`/^\d{9}$/`).
-   - Código OTP Yape: Exactamente 6 dígitos numéricos (`/^\d{6}$/`), no repetitivos triviales (`000000`, `111111`).
-   - CIP de Transferencia: Prefijo `CIP-` seguido de 4 dígitos de año y 6 dígitos secuenciales (`CIP-2026-XXXXXX`).
-3. **Consistencia de Stock**: Toda aprobación de pago ejecuta la deducción de existencias en `products` bajo la misma transacción de base de datos (`db.transaction()`).
+   - Código OTP Yape: Exactamente 6 dígitos numéricos (`/^\d{6}$/`), no repetitivos triviales (`000000`, `111111`). Hash de auditoría: `YAPE-AUTO-XXXXXX`.
+   - Transferencia CIP: Código de referencia para transferir `CIP-2026-XXXXXX` (vigencia 24 horas). Hash de auditoría tras aprobar: `CIP-AUTO-XXXXXX`.
+   - Tarjeta Crédito/Débito: Validación Luhn + fecha vigente + CVV 3-4 dígitos. Hash de auditoría: `AUTH-XXXXXX`.
+3. **Consistencia de Stock y Atomicidad**: Toda reserva CIP, aprobación automática, expiración (> 24h) o cancelación administrativa ejecuta la modificación de existencias en `products` dentro de una transacción explícita de `node:sqlite` (`BEGIN IMMEDIATE` ... `COMMIT` / `ROLLBACK`).
+4. **Integridad `user_id NOT NULL`**: Cuando una compra automática no recibe un `user_id` explícito, el backend resuelve por DNI existente en `users` o asigna el cliente demo base, garantizando cumplimiento de la clave foránea `orders.user_id`.
