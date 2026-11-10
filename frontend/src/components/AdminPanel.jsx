@@ -30,6 +30,9 @@ import {
   Phone,
   QrCode,
   FileText,
+  Zap,
+  Clock,
+  Loader2,
 } from 'lucide-react';
 import api from '../services/api.js';
 
@@ -85,6 +88,11 @@ export default function AdminPanel({
 
   // Modales
   const [selectedVoucherOrder, setSelectedVoucherOrder] = useState(null);
+  const [auditModalOrder, setAuditModalOrder] = useState(null);
+  const [auditData, setAuditData] = useState(null);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [cancelOrderConfirm, setCancelOrderConfirm] = useState(null);
+  const [cancellingOrder, setCancellingOrder] = useState(false);
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [deleteProductConfirm, setDeleteProductConfirm] = useState(null);
@@ -236,8 +244,20 @@ export default function AdminPanel({
 
   // CÁLCULO DE KPIS EN TIEMPO REAL
   const totalRevenue = orders
-    .filter((o) => o.order_status !== 'Cancelado' && o.payment?.payment_status === 'Aprobado')
+    .filter(
+      (o) =>
+        o.order_status !== 'Cancelado' &&
+        o.order_status !== 'Expirado' &&
+        o.payment?.payment_status === 'Aprobado'
+    )
     .reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+
+  const autoVerifiedOrdersCount = orders.filter(
+    (o) =>
+      o.order_status !== 'Cancelado' &&
+      o.order_status !== 'Expirado' &&
+      /^(YAPE-AUTO-|CIP-AUTO-|AUTH-)/.test(o?.payment?.auth_code || '')
+  ).length;
 
   const pendingVerificationOrders = orders.filter(
     (o) =>
@@ -363,6 +383,41 @@ export default function AdminPanel({
     } catch (err) {
       console.error('Error actualizando estado:', err);
       showNotification(err.message || 'Error al actualizar estado del pedido', true);
+    }
+  };
+
+  const isAutoVerified = (order) =>
+    /^(YAPE-AUTO-|CIP-AUTO-|AUTH-)/.test(order?.payment?.auth_code || '');
+
+  const handleViewAudit = async (order) => {
+    setAuditModalOrder(order);
+    setAuditData(null);
+    setAuditLoading(true);
+    try {
+      const data = await api.getPaymentAudit(order.order_code);
+      setAuditData(data);
+    } catch (err) {
+      setAuditData({ error: err.message || 'No se pudo consultar la auditoría bancaria.' });
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  const handleConfirmCancelOrder = async () => {
+    if (!cancelOrderConfirm) return;
+    try {
+      setCancellingOrder(true);
+      await api.cancelOrder(cancelOrderConfirm.id);
+      showNotification(
+        `Orden ${cancelOrderConfirm.order_code} cancelada. Stock restituido automáticamente en SQLite.`
+      );
+      setCancelOrderConfirm(null);
+      await loadAllAdminData();
+    } catch (err) {
+      console.error('Error cancelando orden:', err);
+      showNotification(err.message || 'Error al cancelar la orden', true);
+    } finally {
+      setCancellingOrder(false);
     }
   };
 
@@ -740,7 +795,7 @@ export default function AdminPanel({
               S/ {totalRevenue.toFixed(2)}
             </div>
             <p className="text-[11px] text-emerald-400 font-semibold">
-              ✓ Ingresos confirmados en mis cuentas
+              ✓ Ingresos aprobados ({autoVerifiedOrdersCount} verificados automáticamente)
             </p>
           </div>
 
@@ -973,9 +1028,11 @@ export default function AdminPanel({
                   'Todos',
                   'En Verificación',
                   'Pagado',
+                  'Pendiente de Pago',
                   'Enviado',
                   'Entregado',
                   'Cancelado',
+                  'Expirado',
                 ].map((st) => (
                   <button
                     key={st}
@@ -1009,7 +1066,7 @@ export default function AdminPanel({
                       <th className="py-3 px-4">Método & Cuenta Destino</th>
                       <th className="py-3 px-4">Estado Pago</th>
                       <th className="py-3 px-4">Despacho</th>
-                      <th className="py-3 px-4 text-right">Comprobante</th>
+                      <th className="py-3 px-4 text-right">Auditoría y Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
@@ -1024,10 +1081,16 @@ export default function AdminPanel({
                         const isPending =
                           o.order_status === 'En Verificación' ||
                           o.payment?.payment_status === 'Pendiente de Verificación';
+                        const isPendingCip = o.payment?.payment_status === 'Pendiente (CIP 24h)';
+                        const isExpired =
+                          o.order_status === 'Expirado' ||
+                          o.payment?.payment_status === 'Expirado';
                         const isPaid =
-                          o.order_status === 'Pagado / En Preparación' ||
-                          o.payment?.payment_status === 'Aprobado';
+                          !isExpired &&
+                          (o.order_status === 'Pagado / En Preparación' ||
+                            o.payment?.payment_status === 'Aprobado');
                         const isCancelled = o.order_status === 'Cancelado';
+                        const autoVerified = isAutoVerified(o);
 
                         return (
                           <tr key={o.id} className="hover:bg-slate-800/40 transition-colors">
@@ -1038,6 +1101,12 @@ export default function AdminPanel({
                               <div className="text-[11px] text-slate-400">
                                 {o.created_at ? o.created_at.substring(0, 16) : 'Reciente'}
                               </div>
+                              {autoVerified && (
+                                <span className="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-bold border border-emerald-500/30 whitespace-nowrap">
+                                  <Zap className="w-3 h-3" />
+                                  ✓ Verificado Automáticamente
+                                </span>
+                              )}
                             </td>
                             <td className="py-3 px-4">
                               <div className="font-bold text-white">{o.customer_name}</div>
@@ -1071,6 +1140,11 @@ export default function AdminPanel({
                                 <span className="font-bold text-slate-200">
                                   {o.payment?.method || 'Yape'}
                                 </span>
+                                {o.payment?.auth_code && (
+                                  <div className="text-[10px] text-emerald-400 font-mono font-bold">
+                                    Hash: {o.payment.auth_code}
+                                  </div>
+                                )}
                                 {o.payment?.operation_number && (
                                   <div className="text-[10px] text-orange-400 font-mono">
                                     N° Op: {o.payment.operation_number}
@@ -1086,6 +1160,16 @@ export default function AdminPanel({
                                 <span className="bg-amber-500/20 text-amber-400 border border-amber-500/40 px-2.5 py-1 rounded-full font-bold text-[10px] inline-flex items-center gap-1">
                                   <Receipt className="w-3 h-3" />
                                   Pendiente
+                                </span>
+                              ) : isPendingCip && !isExpired ? (
+                                <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2.5 py-1 rounded-full font-bold text-[10px] inline-flex items-center gap-1 whitespace-nowrap">
+                                  <Clock className="w-3 h-3" />
+                                  Pendiente (CIP 24h)
+                                </span>
+                              ) : isExpired ? (
+                                <span className="bg-slate-800 text-slate-400 border border-slate-700 px-2.5 py-1 rounded-full font-bold text-[10px] inline-flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  Expirado
                                 </span>
                               ) : isPaid ? (
                                 <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-full font-bold text-[10px] inline-flex items-center gap-1">
@@ -1108,25 +1192,77 @@ export default function AdminPanel({
                                 onChange={(e) => handleUpdateOrderStatus(o.id, e.target.value)}
                                 className="bg-slate-950 border border-slate-700 text-slate-200 rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-orange-500 cursor-pointer"
                               >
+                                <option value="Pendiente de Pago">Pendiente de Pago</option>
                                 <option value="En Verificación">En Verificación</option>
                                 <option value="Pagado / En Preparación">Pagado / En Prep.</option>
                                 <option value="Enviado">Enviado 🚚</option>
                                 <option value="Entregado">Entregado ✓</option>
                                 <option value="Cancelado">Cancelado ✕</option>
+                                <option value="Expirado">Expirado ⌛</option>
                               </select>
                             </td>
                             <td className="py-3 px-4 text-right">
-                              <button
-                                onClick={() => setSelectedVoucherOrder(o)}
-                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm ${
-                                  isPending
-                                    ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20 animate-pulse'
-                                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                                }`}
-                              >
-                                <Eye className="w-3.5 h-3.5" />
-                                <span>Ver Voucher</span>
-                              </button>
+                              <div className="flex flex-wrap items-center justify-end gap-1.5">
+                                {autoVerified ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleViewAudit(o)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-blue-600/25 hover:bg-blue-600/40 text-blue-300 border border-blue-500/40 text-[11px] font-bold transition-all"
+                                  >
+                                    <ShieldCheck className="w-3.5 h-3.5" />
+                                    <span>Ver Auditoría</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedVoucherOrder(o)}
+                                    className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all shadow-sm ${
+                                      isPending
+                                        ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/20 animate-pulse'
+                                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                                    }`}
+                                  >
+                                    <Eye className="w-3.5 h-3.5" />
+                                    <span>Ver Voucher</span>
+                                  </button>
+                                )}
+
+                                {o.order_status === 'Pagado / En Preparación' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateOrderStatus(o.id, 'Enviado')}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-orange-600/20 hover:bg-orange-600/40 text-orange-300 border border-orange-500/30 text-[11px] font-bold transition-all"
+                                    title="Marcar como Enviado"
+                                  >
+                                    <Truck className="w-3.5 h-3.5" />
+                                    <span>Marcar como Enviado</span>
+                                  </button>
+                                )}
+
+                                {o.order_status === 'Enviado' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateOrderStatus(o.id, 'Entregado')}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold transition-all"
+                                    title="Marcar como Entregado"
+                                  >
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    <span>Marcar como Entregado</span>
+                                  </button>
+                                )}
+
+                                {!isCancelled && !isExpired && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setCancelOrderConfirm(o)}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/70 text-rose-300 border border-rose-500/30 text-[11px] font-bold transition-all"
+                                    title="Cancelar orden y devolver stock en SQLite"
+                                  >
+                                    <XCircle className="w-3.5 h-3.5" />
+                                    <span>Cancelar y Devolver Stock</span>
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -1524,11 +1660,13 @@ export default function AdminPanel({
                   }
                   className="bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-1.5 text-xs focus:ring-1 focus:ring-orange-500"
                 >
+                  <option value="Pendiente de Pago">Pendiente de Pago</option>
                   <option value="En Verificación">En Verificación</option>
                   <option value="Pagado / En Preparación">Pagado / En Preparación</option>
                   <option value="Enviado">Enviado (Olva / Shalom)</option>
                   <option value="Entregado">Entregado al Cliente</option>
                   <option value="Cancelado">Cancelado</option>
+                  <option value="Expirado">Expirado</option>
                 </select>
               </div>
 
@@ -1897,6 +2035,216 @@ export default function AdminPanel({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 5: AUDITORÍA BANCARIA DE PAGO AUTOMÁTICO (FEATURE 004) */}
+      {/* ========================================================================= */}
+      {auditModalOrder && (
+        <div className="fixed inset-0 z-[70] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-slate-900 border border-emerald-500/40 rounded-3xl p-6 sm:p-7 max-w-xl w-full shadow-2xl max-h-[90vh] overflow-y-auto space-y-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-white flex items-center gap-2">
+                    Auditoría de Pago Automático
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Conciliación financiera directa hacia cuentas del propietario
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuditModalOrder(null);
+                  setAuditData(null);
+                }}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {auditLoading && (
+              <div className="py-10 text-center text-slate-400 flex flex-col items-center gap-2 text-xs">
+                <Loader2 className="w-6 h-6 animate-spin text-emerald-400" />
+                <span>Consultando registro de auditoría en SQLite...</span>
+              </div>
+            )}
+
+            {auditData?.error && (
+              <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
+                {auditData.error}
+              </div>
+            )}
+
+            {auditData && !auditData.error && (
+              <div className="space-y-4 text-xs">
+                <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/30 rounded-2xl px-4 py-3">
+                  <span className="inline-flex items-center gap-1.5 text-emerald-400 font-black">
+                    <Zap className="w-4 h-4" />
+                    ✓ Verificado Automáticamente
+                  </span>
+                  <span className="font-mono font-bold text-emerald-300 text-sm">
+                    {auditData.auth_code}
+                  </span>
+                </div>
+
+                <div className="bg-slate-950 rounded-2xl border border-slate-800 p-4 space-y-2.5">
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-400">Código de Orden:</span>
+                    <span className="font-mono text-white font-bold">{auditData.order_code}</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-400">Canal de Conciliación:</span>
+                    <span className="text-blue-300 font-semibold text-right">{auditData.channel}</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-400">Método de Pago:</span>
+                    <span className="text-white font-bold">{auditData.method}</span>
+                  </div>
+                  {auditData.operation_number && (
+                    <div className="flex justify-between gap-2">
+                      <span className="text-slate-400">N° Operación / OTP:</span>
+                      <span className="font-mono text-orange-400 font-bold">{auditData.operation_number}</span>
+                    </div>
+                  )}
+                  {auditData.card_last4 && (
+                    <div className="flex justify-between gap-2">
+                      <span className="text-slate-400">Tarjeta Autorizada:</span>
+                      <span className="font-mono text-slate-200">•••• {auditData.card_last4}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-400">Cuenta Destino:</span>
+                    <span className="text-slate-200 text-right max-w-[260px]">
+                      {auditData.destination_account}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-2 border-t border-slate-800 pt-2">
+                    <span className="text-slate-400">Monto Liquidado:</span>
+                    <span className="font-mono text-orange-400 font-black text-sm">
+                      S/ {Number(auditData.amount ?? auditData.total).toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-400">Estado de Pago / Orden:</span>
+                    <span className="text-emerald-400 font-bold">
+                      {auditData.payment_status} • {auditData.order_status}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-400">Fecha/Hora de Conciliación:</span>
+                    <span className="font-mono text-slate-300">{auditData.created_at}</span>
+                  </div>
+                </div>
+
+                {/* Desglose de productos listos para empaquetar */}
+                {auditData.items && auditData.items.length > 0 && (
+                  <div className="bg-slate-950 rounded-2xl border border-slate-800 p-4 space-y-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                      Suplementos Listos para Despacho
+                    </span>
+                    <div className="divide-y divide-slate-800/70">
+                      {auditData.items.map((it, idx) => (
+                        <div key={idx} className="py-1.5 flex justify-between items-center text-xs">
+                          <span className="text-slate-200">
+                            <strong className="text-orange-400">{it.quantity}x</strong> {it.product_name}
+                          </span>
+                          <span className="font-mono text-slate-300 font-bold">
+                            S/ {Number(it.subtotal || it.unit_price * it.quantity).toFixed(2)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {auditModalOrder.payment?.voucher_image && (
+                  <div className="bg-slate-950 rounded-2xl border border-slate-800 p-3 flex flex-col items-center gap-2">
+                    <span className="text-[11px] font-bold text-slate-400 self-start">
+                      Comprobante Adjunto
+                    </span>
+                    <img
+                      src={auditModalOrder.payment.voucher_image}
+                      alt="Comprobante"
+                      className="max-h-48 object-contain rounded-xl border border-slate-800"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 6: CONFIRMAR CANCELACIÓN DE ORDEN Y REVERSIÓN DE STOCK */}
+      {/* ========================================================================= */}
+      {cancelOrderConfirm && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn">
+          <div className="bg-slate-900 border border-rose-500/40 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center border border-rose-500/30 shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-white">
+                  Cancelar Orden y Devolver Stock
+                </h3>
+                <p className="text-xs text-rose-300 font-mono">
+                  {cancelOrderConfirm.order_code} • S/ {Number(cancelOrderConfirm.total).toFixed(2)}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Esta acción cambiará el estado de la orden a <strong className="text-rose-300">Cancelado</strong>, el pago a <strong className="text-rose-300">Rechazado</strong> y reintegrará automáticamente las unidades al inventario de productos en SQLite.
+            </p>
+
+            {cancelOrderConfirm.items && cancelOrderConfirm.items.length > 0 && (
+              <div className="bg-slate-950 rounded-xl p-3 border border-slate-800 space-y-1 text-[11px]">
+                <span className="text-slate-400 font-bold block mb-1">Stock a restaurar:</span>
+                {cancelOrderConfirm.items.map((it, idx) => (
+                  <div key={idx} className="flex justify-between text-slate-200">
+                    <span className="truncate pr-2">{it.product_name}</span>
+                    <span className="font-mono font-bold text-emerald-400 shrink-0">+{it.quantity} un.</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleConfirmCancelOrder}
+                disabled={cancellingOrder}
+                className="flex-1 bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2"
+              >
+                {cancellingOrder ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Procesando...</span>
+                  </>
+                ) : (
+                  <span>Confirmar Anulación y Devolver Stock</span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCancelOrderConfirm(null)}
+                disabled={cancellingOrder}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2.5 px-4 rounded-xl text-xs"
+              >
+                Volver
+              </button>
+            </div>
           </div>
         </div>
       )}

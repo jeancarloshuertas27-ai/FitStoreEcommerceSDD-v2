@@ -17,12 +17,48 @@ import {
   Lock,
   Loader2,
   ShoppingBag,
+  Clock,
 } from 'lucide-react';
 import { useCart } from '../context/CartContext.jsx';
 import api from '../services/api.js';
 import { generateDemoVoucher, generateRandomOperationNumber } from '../utils/voucherGenerator.js';
 import { generateQrSvgDataUri } from '../utils/qrGenerator.js';
 import ElectronicReceipt from './ElectronicReceipt.jsx';
+import AutoVerifyModal from './AutoVerifyModal.jsx';
+
+const luhn = (n) => {
+  let sum = 0;
+  let alt = false;
+  for (let i = n.length - 1; i >= 0; i--) {
+    let d = +n[i];
+    if (alt) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+    alt = !alt;
+  }
+  return sum % 10 === 0;
+};
+
+const isValidExpiry = (expiry) => {
+  const match = /^(\d{2})\/(\d{2})$/.exec((expiry || '').trim());
+  if (!match) return false;
+  const month = Number(match[1]);
+  const year = 2000 + Number(match[2]);
+  if (month < 1 || month > 12) return false;
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  return year > currentYear || (year === currentYear && month >= currentMonth);
+};
+
+const formatCountdown = (totalSeconds) => {
+  const hrs = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+  const mins = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+  const secs = String(totalSeconds % 60).padStart(2, '0');
+  return `${hrs}:${mins}:${secs}`;
+};
 
 export default function CheckoutModal({ isOpen, onClose, storeSettings, currentUser, onOrderCompleted }) {
   const { items, total, totalItems, clearCart } = useCart();
@@ -42,6 +78,19 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
 
   // Paso 2: Método de Pago seleccionado: 'Yape' | 'Plin' | 'Transferencia Bancaria' | 'Tarjeta Crédito/Débito'
   const [paymentMethod, setPaymentMethod] = useState('Yape');
+
+  // Pestaña interna y campos OTP para Yape / Plin
+  const [yapePlinTab, setYapePlinTab] = useState('otp');
+  const [otpPhone, setOtpPhone] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+
+  // Modal animado de verificación automática
+  const [autoVerifyOpen, setAutoVerifyOpen] = useState(false);
+  const [autoVerifyPayload, setAutoVerifyPayload] = useState(null);
+
+  // Referencia CIP y cuenta regresiva de 24h para Transferencia Bancaria
+  const [cipReference, setCipReference] = useState('');
+  const [cipSecondsLeft, setCipSecondsLeft] = useState(24 * 60 * 60);
 
   // Campos de Yape / Plin / Transferencia
   const [operationNumber, setOperationNumber] = useState('');
@@ -86,9 +135,15 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
       setStep(1);
       setErrorMessage(null);
       setCompletedOrder(null);
+      setYapePlinTab('otp');
+      setOtpPhone('');
+      setOtpCode('');
+      setAutoVerifyOpen(false);
+      setAutoVerifyPayload(null);
       setOperationNumber('');
       setVoucherBase64(null);
       setVoucherFileName('');
+      setCardErrors({});
       setCardData({
         number: '',
         holder: activeUser.name || '',
@@ -98,6 +153,27 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
       });
     }
   }, [isOpen, currentUser]);
+
+  // Reiniciar pestaña interna y generar CIP cuando cambia el método de pago
+  useEffect(() => {
+    if (!isOpen) return;
+    setYapePlinTab('otp');
+    setErrorMessage(null);
+    if (paymentMethod === 'Transferencia Bancaria') {
+      const ref = 'CIP-2026-' + Math.floor(100000 + Math.random() * 900000);
+      setCipReference(ref);
+      setCipSecondsLeft(24 * 60 * 60);
+    }
+  }, [isOpen, paymentMethod]);
+
+  // Temporizador regresivo 24h en vivo para Transferencia Bancaria CIP
+  useEffect(() => {
+    if (!isOpen || paymentMethod !== 'Transferencia Bancaria') return;
+    const interval = setInterval(() => {
+      setCipSecondsLeft((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isOpen, paymentMethod]);
 
   if (!isOpen) return null;
 
@@ -111,7 +187,7 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
 
   // Copiado al portapapeles con feedback visual
   const handleCopy = (text, fieldName) => {
-    navigator.clipboard.writeText(text);
+    navigator.clipboard?.writeText(text);
     setCopiedField(fieldName);
     setTimeout(() => setCopiedField(null), 2000);
   };
@@ -136,6 +212,16 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
       setStep(2);
       setErrorMessage(null);
     }
+  };
+
+  // Generador Demo de OTP válido de 6 dígitos (no trivial)
+  const handleGenerateDemoOtp = () => {
+    let code = '';
+    do {
+      code = String(Math.floor(100000 + Math.random() * 900000));
+    } while (/^(\d)\1{5}$/.test(code));
+    setOtpCode(code);
+    setErrorMessage(null);
   };
 
   // Generador Demo de N° de Operación en 1 clic
@@ -206,6 +292,9 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
     const raw = e.target.value.replace(/\D/g, '').slice(0, 16);
     const formatted = raw.replace(/(\d{4})(?=\d)/g, '$1 ');
     setCardData({ ...cardData, number: formatted });
+    if (cardErrors.number) {
+      setCardErrors((prev) => ({ ...prev, number: undefined }));
+    }
   };
 
   const handleExpiryChange = (e) => {
@@ -214,10 +303,133 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
       raw = raw.slice(0, 2) + '/' + raw.slice(2);
     }
     setCardData({ ...cardData, expiry: raw });
+    if (cardErrors.expiry) {
+      setCardErrors((prev) => ({ ...prev, expiry: undefined }));
+    }
   };
 
-  // Confirmar y Procesar Pago
-  const handleSubmitPayment = async () => {
+  const buildOrderBasePayload = () => ({
+    user_id: currentUser?.id || 2,
+    customer: {
+      name: formData.name.trim(),
+      dni: formData.dni.trim(),
+      phone: formData.phone.trim(),
+      address: `${formData.address.trim()}, ${formData.city}`,
+      city: formData.city,
+    },
+    items: items.map((it) => ({
+      product_id: it.id,
+      product_name: it.name,
+      quantity: it.quantity,
+      unit_price: it.price,
+      subtotal: Number((it.price * it.quantity).toFixed(2)),
+    })),
+    total,
+  });
+
+  // Callback de éxito del Modal de Verificación Automática
+  const handleAutoVerifySuccess = (result) => {
+    setAutoVerifyOpen(false);
+    setAutoVerifyPayload(null);
+    clearCart();
+
+    const fullOrder = {
+      ...(result?.order || result),
+      id: result?.order?.id || result?.order_id,
+      order_code: result?.order?.order_code || result?.order_code,
+      customer_name: result?.order?.customer_name || formData.name.trim(),
+      customer_dni: result?.order?.customer_dni || formData.dni.trim(),
+      customer_phone: result?.order?.customer_phone || formData.phone.trim(),
+      shipping_address: result?.order?.shipping_address || `${formData.address.trim()}, ${formData.city}`,
+      total: result?.order?.total ?? total,
+      order_status: result?.order?.order_status || 'Pagado / En Preparación',
+      created_at: result?.order?.created_at || new Date().toISOString(),
+      items:
+        result?.order?.items ||
+        result?.items ||
+        items.map((it) => ({
+          product_id: it.id,
+          product_name: it.name,
+          quantity: it.quantity,
+          unit_price: it.price,
+          subtotal: it.price * it.quantity,
+        })),
+      payment: result?.order?.payment || result?.payment || {},
+    };
+
+    setCompletedOrder(fullOrder);
+    setStep(3);
+    if (onOrderCompleted) onOrderCompleted(fullOrder);
+  };
+
+  // Callback de error del Modal de Verificación Automática (mantiene checkout abierto)
+  const handleAutoVerifyError = (msg) => {
+    setAutoVerifyOpen(false);
+    setErrorMessage(msg || 'No se pudo verificar el pago. Revisa los datos e intenta nuevamente.');
+  };
+
+  // Disparo Yape / Plin Tab 1: Código de Aprobación (OTP)
+  const handleYapePlinOtpSubmit = () => {
+    setErrorMessage(null);
+    if (items.length === 0) {
+      setErrorMessage('El carrito no contiene productos.');
+      return;
+    }
+    if (!/^\d{9}$/.test(otpPhone.trim())) {
+      setErrorMessage('Ingresa tu número celular de 9 dígitos registrado en Yape/Plin.');
+      return;
+    }
+    if (!otpCode.trim()) {
+      setErrorMessage('Ingresa el Código de Aprobación de 6 dígitos de tu app.');
+      return;
+    }
+
+    const base = buildOrderBasePayload();
+    setAutoVerifyPayload({
+      modalMethod: 'yape_plin',
+      requestData: {
+        ...base,
+        method: 'yape_plin',
+        mode: 'otp',
+        verification_mode: 'otp',
+        sub_method: paymentMethod === 'Plin' ? 'plin' : 'yape',
+        phone: otpPhone.trim(),
+        otp_code: otpCode.trim(),
+      },
+    });
+    setAutoVerifyOpen(true);
+  };
+
+  // Disparo Yape / Plin Tab 2: Escanear QR + N° Operación
+  const handleYapePlinQrSubmit = () => {
+    setErrorMessage(null);
+    if (items.length === 0) {
+      setErrorMessage('El carrito no contiene productos.');
+      return;
+    }
+    if (!operationNumber.trim()) {
+      setErrorMessage('Por favor ingresa o genera el Número de Operación de tu pago.');
+      return;
+    }
+
+    const base = buildOrderBasePayload();
+    setAutoVerifyPayload({
+      modalMethod: 'yape_plin',
+      requestData: {
+        ...base,
+        method: 'yape_plin',
+        mode: 'qr',
+        verification_mode: 'qr',
+        sub_method: paymentMethod === 'Plin' ? 'plin' : 'yape',
+        operation_number: operationNumber.trim(),
+        voucher_image: voucherBase64 || null,
+      },
+    });
+    setAutoVerifyOpen(true);
+  };
+
+  // Confirmar y Procesar Pago (Transferencia Bancaria y Tarjeta)
+  const handleSubmitPayment = () => {
     setErrorMessage(null);
 
     if (items.length === 0) {
@@ -225,131 +437,106 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
       return;
     }
 
-    // Validaciones por método
+    const base = buildOrderBasePayload();
+
     if (paymentMethod === 'Tarjeta Crédito/Débito') {
       const cardNumClean = cardData.number.replace(/\s/g, '');
       const errs = {};
-      if (cardNumClean.length !== 16) errs.number = 'La tarjeta debe tener 16 dígitos';
+      if (cardNumClean.length !== 16) {
+        errs.number = 'La tarjeta debe tener 16 dígitos';
+      } else if (!luhn(cardNumClean)) {
+        errs.number = 'Número de tarjeta inválido (Luhn)';
+      }
       if (!cardData.holder.trim()) errs.holder = 'Ingresa el nombre del titular';
-      if (!/^\d{2}\/\d{2}$/.test(cardData.expiry)) errs.expiry = 'Formato inválido (MM/AA)';
-      if (cardData.cvv.length < 3) errs.cvv = 'CVV de 3 dígitos requerido';
+      if (!isValidExpiry(cardData.expiry)) {
+        errs.expiry = 'Fecha inválida o expirada (MM/AA)';
+      }
+      if (cardData.cvv.length < 3) errs.cvv = 'CVV de 3 o 4 dígitos requerido';
 
       if (Object.keys(errs).length > 0) {
         setCardErrors(errs);
         return;
       }
-    } else {
-      // Yape / Plin / Transferencia requieren N° de Operación y Voucher
+
+      setAutoVerifyPayload({
+        modalMethod: 'credit_card',
+        requestData: {
+          ...base,
+          method: 'credit_card',
+          card_number: cardNumClean,
+          card_expiry: cardData.expiry.trim(),
+          card_cvv: cardData.cvv.trim(),
+          card_holder: cardData.holder.trim(),
+          card_last4: cardNumClean.slice(-4),
+          installments: cardData.installments,
+        },
+      });
+      setAutoVerifyOpen(true);
+      return;
+    }
+
+    if (paymentMethod === 'Transferencia Bancaria') {
       if (!operationNumber.trim()) {
-        setErrorMessage('Por favor ingresa o genera el Número de Operación de tu pago.');
+        setErrorMessage('Por favor ingresa o genera el Número de Operación Bancaria.');
         return;
       }
-      if (!voucherBase64) {
-        setErrorMessage('Por favor adjunta la captura de tu voucher o pulsa "Cargar Voucher de Prueba".');
-        return;
-      }
+
+      setAutoVerifyPayload({
+        modalMethod: 'bank_transfer',
+        requestData: {
+          ...base,
+          method: 'bank_transfer',
+          action: 'verify',
+          operation_number: operationNumber.trim(),
+          cip_reference: cipReference,
+          cip_code: cipReference,
+          voucher_image: voucherBase64 || null,
+        },
+      });
+      setAutoVerifyOpen(true);
+      return;
+    }
+
+    // Fallback en caso se invoque sobre Yape/Plin
+    if (yapePlinTab === 'otp') {
+      handleYapePlinOtpSubmit();
+    } else {
+      handleYapePlinQrSubmit();
+    }
+  };
+
+  // Reservar pedido con Código CIP de 24 horas para confirmar abono luego desde la boleta
+  const handleReserveCip = async () => {
+    setErrorMessage(null);
+    if (items.length === 0) {
+      setErrorMessage('El carrito no contiene productos.');
+      return;
     }
 
     setIsSubmitting(true);
-
     try {
-      // Simular delay bancario para tarjeta sandbox
-      if (paymentMethod === 'Tarjeta Crédito/Débito') {
-        await new Promise((resolve) => setTimeout(resolve, 800));
-      }
+      const base = buildOrderBasePayload();
+      const result = await api.autoVerifyPayment({
+        ...base,
+        method: 'bank_transfer',
+        action: 'reserve_cip',
+        cip_reference: cipReference,
+        cip_code: cipReference,
+      });
 
-      // Determinar cuenta receptora exacta del dueño y payload de pago
-      let paymentPayload = {};
-
-      if (paymentMethod === 'Yape') {
-        paymentPayload = {
-          method: 'Yape',
-          destination_account: `Yape: ${yapeNumber} (${ownerName})`,
-          amount: total,
-          currency: 'PEN',
-          operation_number: operationNumber.trim(),
-          voucher_image: voucherBase64,
-          card_last4: null,
-          auth_code: null,
-          payment_status: 'Pendiente de Verificación',
-        };
-      } else if (paymentMethod === 'Plin') {
-        paymentPayload = {
-          method: 'Plin',
-          destination_account: `Plin: ${plinNumber} (${ownerName})`,
-          amount: total,
-          currency: 'PEN',
-          operation_number: operationNumber.trim(),
-          voucher_image: voucherBase64,
-          card_last4: null,
-          auth_code: null,
-          payment_status: 'Pendiente de Verificación',
-        };
-      } else if (paymentMethod === 'Transferencia Bancaria') {
-        paymentPayload = {
-          method: 'Transferencia Bancaria',
-          destination_account: `${bankName} Cta: ${bankAccountSoles} (${ownerName})`,
-          amount: total,
-          currency: 'PEN',
-          operation_number: operationNumber.trim(),
-          voucher_image: voucherBase64,
-          card_last4: null,
-          auth_code: null,
-          payment_status: 'Pendiente de Verificación',
-        };
-      } else {
-        // Tarjeta Sandbox con liquidación a cuenta recaudadora
-        const authRandom = Math.floor(1000 + Math.random() * 9000);
-        const cardLast4 = cardData.number.replace(/\s/g, '').slice(-4);
-        paymentPayload = {
-          method: 'Tarjeta Crédito/Débito',
-          destination_account: `Cuenta Recaudadora BCP: ${bankAccountSoles} (${ownerName})`,
-          amount: total,
-          currency: 'PEN',
-          operation_number: `TARJ-${authRandom}`,
-          voucher_image: null,
-          card_last4: cardLast4,
-          auth_code: `AUTH-${authRandom}`,
-          payment_status: 'Aprobado',
-        };
-      }
-
-      const orderPayload = {
-        user_id: currentUser?.id || 2,
-        customer_name: formData.name.trim(),
-        customer_dni: formData.dni.trim(),
-        customer_phone: formData.phone.trim(),
-        shipping_address: `${formData.address.trim()}, ${formData.city}`,
-        total,
-        items: items.map((it) => ({
-          product_id: it.id,
-          product_name: it.name,
-          quantity: it.quantity,
-          unit_price: it.price,
-        })),
-        payment: paymentPayload,
-      };
-
-      const result = await api.createOrder(orderPayload);
-
-      // Vaciar carrito reactivo y en localStorage (FR-015 / T022)
       clearCart();
-
-      // Guardar orden completa para la Boleta Electrónica
-      const fullOrder = result.order || {
-        ...orderPayload,
-        id: result.order_id,
-        order_code: result.order_code,
-        payment: paymentPayload,
+      const fullOrder = {
+        ...(result?.order || result),
+        id: result?.order?.id || result?.order_id,
+        order_code: result?.order?.order_code || result?.order_code,
+        items: result?.order?.items || result?.items || base.items,
+        payment: result?.order?.payment || result?.payment || {},
       };
-
       setCompletedOrder(fullOrder);
-      setStep(3); // Mostrar Boleta Electrónica
-
+      setStep(3);
       if (onOrderCompleted) onOrderCompleted(fullOrder);
     } catch (err) {
-      console.error('Error procesando pago:', err);
-      setErrorMessage(err.message || 'No se pudo procesar la orden. Inténtalo nuevamente.');
+      setErrorMessage(err?.message || 'No se pudo generar la reserva CIP de 24 horas.');
     } finally {
       setIsSubmitting(false);
     }
@@ -362,6 +549,10 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
         order={completedOrder}
         storeSettings={storeSettings}
         onClose={onClose}
+        onOrderUpdated={(updatedOrder) => {
+          setCompletedOrder(updatedOrder);
+          if (onOrderCompleted) onOrderCompleted(updatedOrder);
+        }}
         onGoToOrders={() => {
           onClose();
           window.location.hash = '#profile';
@@ -659,295 +850,438 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
                 </button>
               </div>
 
-              {/* VÍA 1: YAPE (US1 / T007) */}
-              {paymentMethod === 'Yape' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-950/60 p-5 rounded-3xl border border-purple-500/30">
-                  {/* Tarjeta de Datos de Yape y QR */}
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                      <div>
-                        <span className="text-xs font-bold text-purple-300 block uppercase tracking-wider">
-                          Billetera Digital Yape
-                        </span>
-                        <span className="text-[11px] text-slate-400">Escanea o envía directamente al número</span>
-                      </div>
-                      <div className="px-2.5 py-1 rounded-full bg-purple-500/20 text-purple-300 text-[10px] font-bold border border-purple-500/30">
-                        Acreditación Inmediata
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
-                      <div>
-                        <span className="text-[11px] text-slate-400 block">Titular de la Cuenta:</span>
-                        <strong className="text-white text-sm">{ownerName}</strong>
-                      </div>
-
-                      <div className="flex items-center justify-between bg-slate-950 px-3.5 py-2.5 rounded-xl border border-slate-800">
-                        <div>
-                          <span className="text-[10px] text-slate-400 block">Número de Yape:</span>
-                          <span className="text-base font-black font-mono text-teal-300 tracking-wider">
-                            {yapeNumber}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(yapeNumber, 'yape')}
-                          className="px-3 py-1.5 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 text-xs font-bold flex items-center gap-1.5 border border-purple-500/40 transition-all"
-                        >
-                          {copiedField === 'yape' ? <Check className="w-3.5 h-3.5 text-teal-300" /> : <Copy className="w-3.5 h-3.5" />}
-                          <span>{copiedField === 'yape' ? '¡Copiado!' : 'Copiar Número'}</span>
-                        </button>
-                      </div>
-
-                      <div className="flex items-center justify-between pt-1">
-                        <span className="text-xs text-slate-300">Total a Yapear:</span>
-                        <span className="text-xl font-black text-teal-300 font-mono">
-                          S/ {total.toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* QR Dinámico Vectorial */}
-                    <div className="bg-white p-3 rounded-2xl flex flex-col items-center justify-center mx-auto w-fit shadow-xl">
-                      <img src={yapeQrUri} alt="Código QR Yape" className="w-40 h-40 rounded-lg" />
-                      <span className="text-[10px] font-bold text-slate-800 mt-1">Escanea desde tu app Yape</span>
-                    </div>
-                  </div>
-
-                  {/* Formulario de Operación y Voucher */}
-                  <div className="space-y-4 flex flex-col justify-between">
-                    <div className="space-y-4">
-                      <div className="pb-2 border-b border-slate-800">
-                        <span className="text-xs font-bold text-slate-200 uppercase tracking-wider block">
-                          Comprobación de Pago
-                        </span>
-                        <span className="text-[11px] text-slate-400">
-                          Ingresa los datos o usa los botones de demostración rápida
-                        </span>
-                      </div>
-
-                      {/* N° Operación */}
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <label className="text-xs font-semibold text-slate-300">
-                            Número de Operación Yape (6 a 8 dígitos) *
-                          </label>
-                          <button
-                            type="button"
-                            onClick={handleGenerateDemoOp}
-                            className="text-[11px] text-orange-400 hover:text-orange-300 font-bold flex items-center gap-1 transition-all"
-                          >
-                            <Sparkles className="w-3 h-3" />
-                            Generar N° Demo
-                          </button>
-                        </div>
-                        <input
-                          type="text"
-                          value={operationNumber}
-                          onChange={(e) => setOperationNumber(e.target.value)}
-                          placeholder="Ej. OP-839214"
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:outline-none focus:border-purple-500 transition-all"
-                        />
-                      </div>
-
-                      {/* Voucher Upload & Demo */}
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <label className="text-xs font-semibold text-slate-300">
-                            Captura del Voucher de Yape *
-                          </label>
-                          <button
-                            type="button"
-                            onClick={handleLoadDemoVoucher}
-                            className="text-[11px] text-teal-400 hover:text-teal-300 font-bold flex items-center gap-1 transition-all"
-                          >
-                            <Sparkles className="w-3 h-3" />
-                            Cargar Voucher de Prueba
-                          </button>
-                        </div>
-
-                        <label className="border-2 border-dashed border-slate-800 hover:border-purple-500/60 rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer bg-slate-950/40 hover:bg-purple-950/10 transition-all">
-                          <Upload className="w-6 h-6 text-slate-400 mb-1" />
-                          <span className="text-xs font-semibold text-slate-300">
-                            {voucherFileName || 'Seleccionar captura de voucher (.png / .jpg)'}
-                          </span>
-                          <span className="text-[10px] text-slate-400 mt-0.5">Máximo 5 MB</span>
-                          <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
-                        </label>
-                      </div>
-
-                      {/* Preview Voucher */}
-                      {voucherBase64 && (
-                        <div className="p-3 bg-slate-900 rounded-2xl border border-slate-800 flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <img src={voucherBase64} alt="Voucher" className="w-10 h-14 object-cover rounded-lg border border-slate-700" />
-                            <div>
-                              <span className="text-xs font-bold text-slate-200 block">Voucher Cargado</span>
-                              <span className="text-[10px] text-emerald-400">Listo para registrar en SQLite</span>
-                            </div>
-                          </div>
-                          <span className="text-xs text-teal-400 font-mono font-bold">{operationNumber}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="text-[11px] text-slate-400 bg-slate-950 p-3 rounded-xl border border-slate-800">
-                      Cuenta destino registrada: <br />
-                      <strong className="text-purple-300 font-mono">
-                        Yape: {yapeNumber} ({ownerName})
-                      </strong>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* VÍA 2: PLIN (US1 / T008) */}
-              {paymentMethod === 'Plin' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-950/60 p-5 rounded-3xl border border-sky-500/30">
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                      <div>
-                        <span className="text-xs font-bold text-sky-300 block uppercase tracking-wider">
-                          Billetera Digital Plin
-                        </span>
-                        <span className="text-[11px] text-slate-400">BBVA, Interbank, Scotiabank y BanBif</span>
-                      </div>
-                      <div className="px-2.5 py-1 rounded-full bg-sky-500/20 text-sky-300 text-[10px] font-bold border border-sky-500/30">
-                        Interbancario Móvil
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
-                      <div>
-                        <span className="text-[11px] text-slate-400 block">Titular Plin:</span>
-                        <strong className="text-white text-sm">{ownerName}</strong>
-                      </div>
-
-                      <div className="flex items-center justify-between bg-slate-950 px-3.5 py-2.5 rounded-xl border border-slate-800">
-                        <div>
-                          <span className="text-[10px] text-slate-400 block">Número de Plin:</span>
-                          <span className="text-base font-black font-mono text-sky-300 tracking-wider">
-                            {plinNumber}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(plinNumber, 'plin')}
-                          className="px-3 py-1.5 rounded-lg bg-sky-600/30 hover:bg-sky-600/50 text-sky-200 text-xs font-bold flex items-center gap-1.5 border border-sky-500/40 transition-all"
-                        >
-                          {copiedField === 'plin' ? <Check className="w-3.5 h-3.5 text-orange-400" /> : <Copy className="w-3.5 h-3.5" />}
-                          <span>{copiedField === 'plin' ? '¡Copiado!' : 'Copiar Número'}</span>
-                        </button>
-                      </div>
-
-                      <div className="flex items-center justify-between pt-1">
-                        <span className="text-xs text-slate-300">Total a Transferir:</span>
-                        <span className="text-xl font-black text-sky-300 font-mono">
-                          S/ {total.toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="bg-white p-3 rounded-2xl flex flex-col items-center justify-center mx-auto w-fit shadow-xl">
-                      <img src={plinQrUri} alt="Código QR Plin" className="w-40 h-40 rounded-lg" />
-                      <span className="text-[10px] font-bold text-slate-800 mt-1">Escanea desde tu app Plin</span>
-                    </div>
-                  </div>
-
-                  {/* Inputs Plin */}
-                  <div className="space-y-4 flex flex-col justify-between">
-                    <div className="space-y-4">
-                      <div className="pb-2 border-b border-slate-800">
-                        <span className="text-xs font-bold text-slate-200 uppercase tracking-wider block">
-                          Comprobación Plin
-                        </span>
-                        <span className="text-[11px] text-slate-400">Ingresa N° de operación y voucher</span>
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <label className="text-xs font-semibold text-slate-300">
-                            Número de Operación Plin *
-                          </label>
-                          <button
-                            type="button"
-                            onClick={handleGenerateDemoOp}
-                            className="text-[11px] text-orange-400 hover:text-orange-300 font-bold flex items-center gap-1 transition-all"
-                          >
-                            <Sparkles className="w-3 h-3" />
-                            Generar N° Demo
-                          </button>
-                        </div>
-                        <input
-                          type="text"
-                          value={operationNumber}
-                          onChange={(e) => setOperationNumber(e.target.value)}
-                          placeholder="Ej. PLIN-948120"
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:outline-none focus:border-sky-500 transition-all"
-                        />
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <label className="text-xs font-semibold text-slate-300">
-                            Captura del Voucher Plin *
-                          </label>
-                          <button
-                            type="button"
-                            onClick={handleLoadDemoVoucher}
-                            className="text-[11px] text-sky-400 hover:text-sky-300 font-bold flex items-center gap-1 transition-all"
-                          >
-                            <Sparkles className="w-3 h-3" />
-                            Cargar Voucher de Prueba
-                          </button>
-                        </div>
-
-                        <label className="border-2 border-dashed border-slate-800 hover:border-sky-500/60 rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer bg-slate-950/40 hover:bg-sky-950/10 transition-all">
-                          <Upload className="w-6 h-6 text-slate-400 mb-1" />
-                          <span className="text-xs font-semibold text-slate-300">
-                            {voucherFileName || 'Seleccionar captura de voucher (.png / .jpg)'}
-                          </span>
-                          <span className="text-[10px] text-slate-400 mt-0.5">Máximo 5 MB</span>
-                          <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
-                        </label>
-                      </div>
-
-                      {voucherBase64 && (
-                        <div className="p-3 bg-slate-900 rounded-2xl border border-slate-800 flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <img src={voucherBase64} alt="Voucher" className="w-10 h-14 object-cover rounded-lg border border-slate-700" />
-                            <div>
-                              <span className="text-xs font-bold text-slate-200 block">Voucher Plin Cargado</span>
-                              <span className="text-[10px] text-emerald-400">Verificado</span>
-                            </div>
-                          </div>
-                          <span className="text-xs text-sky-400 font-mono font-bold">{operationNumber}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="text-[11px] text-slate-400 bg-slate-950 p-3 rounded-xl border border-slate-800">
-                      Cuenta destino registrada: <br />
-                      <strong className="text-sky-300 font-mono">
-                        Plin: {plinNumber} ({ownerName})
-                      </strong>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* VÍA 3: TRANSFERENCIA BANCARIA BCP / CCI (US2 / T012-T015) */}
-              {paymentMethod === 'Transferencia Bancaria' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-950/60 p-5 rounded-3xl border border-blue-500/30">
-                  {/* Tarjeta Bancaria BCP */}
-                  <div className="space-y-4">
-                    <div className="pb-2 border-b border-slate-800">
-                      <span className="text-xs font-bold text-blue-300 uppercase tracking-wider block">
-                        Transferencia Directa a Cuenta
+              {/* VÍA 1 & 2 UNIFICADAS: YAPE / PLIN CON VERIFICACIÓN AUTOMÁTICA (OTP Y QR) */}
+              {(paymentMethod === 'Yape' || paymentMethod === 'Plin') && (
+                <div
+                  className={`space-y-5 bg-slate-950/60 p-5 rounded-3xl border ${
+                    paymentMethod === 'Plin' ? 'border-sky-500/30' : 'border-purple-500/30'
+                  }`}
+                >
+                  {/* Encabezado de billetera activa + pestañas internas */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+                    <div>
+                      <span
+                        className={`text-xs font-bold block uppercase tracking-wider ${
+                          paymentMethod === 'Plin' ? 'text-sky-300' : 'text-purple-300'
+                        }`}
+                      >
+                        Billetera Digital {paymentMethod} — Verificación Instantánea
                       </span>
                       <span className="text-[11px] text-slate-400">
-                        Abono a través de Banca Móvil BCP o Interbancario CCI
+                        {paymentMethod === 'Plin'
+                          ? 'BBVA, Interbank, Scotiabank y BanBif • Sin comisiones'
+                          : 'Pago directo al celular del titular • Acreditación inmediata'}
                       </span>
+                    </div>
+
+                    <div className="inline-flex p-1 rounded-xl bg-slate-900 border border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setYapePlinTab('otp');
+                          setErrorMessage(null);
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          yapePlinTab === 'otp'
+                            ? paymentMethod === 'Plin'
+                              ? 'bg-sky-600 text-white shadow'
+                              : 'bg-purple-600 text-white shadow'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Código de Aprobación {paymentMethod} (6 dígitos)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setYapePlinTab('qr');
+                          setErrorMessage(null);
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          yapePlinTab === 'qr'
+                            ? paymentMethod === 'Plin'
+                              ? 'bg-sky-600 text-white shadow'
+                              : 'bg-purple-600 text-white shadow'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Escanear QR + N° Operación
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* PESTAÑA 1 (PREDETERMINADA): CÓDIGO DE APROBACIÓN (OTP) */}
+                  {yapePlinTab === 'otp' && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Datos del destinatario */}
+                      <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-4 flex flex-col justify-between">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                              Destinatario Oficial
+                            </span>
+                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[10px] font-bold border border-emerald-500/30">
+                              Verificación Automática 2.5s
+                            </span>
+                          </div>
+
+                          <div>
+                            <span className="text-[11px] text-slate-400 block">Titular de la Cuenta:</span>
+                            <strong className="text-white text-sm">{ownerName}</strong>
+                          </div>
+
+                          <div className="flex items-center justify-between bg-slate-950 px-3.5 py-2.5 rounded-xl border border-slate-800">
+                            <div>
+                              <span className="text-[10px] text-slate-400 block">
+                                Número de {paymentMethod}:
+                              </span>
+                              <span
+                                className={`text-base font-black font-mono tracking-wider ${
+                                  paymentMethod === 'Plin' ? 'text-sky-300' : 'text-teal-300'
+                                }`}
+                              >
+                                {paymentMethod === 'Plin' ? plinNumber : yapeNumber}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleCopy(
+                                  paymentMethod === 'Plin' ? plinNumber : yapeNumber,
+                                  paymentMethod === 'Plin' ? 'plin' : 'yape'
+                                )
+                              }
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-all ${
+                                paymentMethod === 'Plin'
+                                  ? 'bg-sky-600/30 hover:bg-sky-600/50 text-sky-200 border-sky-500/40'
+                                  : 'bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border-purple-500/40'
+                              }`}
+                            >
+                              {copiedField === (paymentMethod === 'Plin' ? 'plin' : 'yape') ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                              <span>
+                                {copiedField === (paymentMethod === 'Plin' ? 'plin' : 'yape')
+                                  ? '¡Copiado!'
+                                  : 'Copiar Número'}
+                              </span>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+                          <span className="text-xs text-slate-300">Total a Pagar:</span>
+                          <span
+                            className={`text-xl font-black font-mono ${
+                              paymentMethod === 'Plin' ? 'text-sky-300' : 'text-teal-300'
+                            }`}
+                          >
+                            S/ {total.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Formulario OTP */}
+                      <div className="space-y-4 flex flex-col justify-between">
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                              Tu número celular registrado en Yape/Plin *
+                            </label>
+                            <div className="relative">
+                              <Smartphone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                              <input
+                                type="text"
+                                maxLength={9}
+                                value={otpPhone}
+                                onChange={(e) => setOtpPhone(e.target.value.replace(/\D/g, ''))}
+                                placeholder="987654321"
+                                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-white font-mono focus:outline-none focus:border-purple-500 transition-all"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="flex justify-between items-center mb-1">
+                              <label className="text-xs font-semibold text-slate-300">
+                                Código de Aprobación de 6 dígitos *
+                              </label>
+                              <button
+                                type="button"
+                                onClick={handleGenerateDemoOtp}
+                                className="text-[11px] text-orange-400 hover:text-orange-300 font-bold flex items-center gap-1 transition-all"
+                              >
+                                <Sparkles className="w-3 h-3" />
+                                Generar OTP Demo
+                              </button>
+                            </div>
+                            <input
+                              type="text"
+                              maxLength={6}
+                              value={otpCode}
+                              onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                              placeholder="Ej. 492104"
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white font-mono tracking-widest focus:outline-none focus:border-purple-500 transition-all"
+                            />
+                            <p className="text-[11px] text-slate-400 mt-1">
+                              El código aparece en la notificación de tu app
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleYapePlinOtpSubmit}
+                          className={`w-full py-3 px-6 rounded-2xl font-black text-xs sm:text-sm text-white flex items-center justify-center gap-2 shadow-xl transition-all ${
+                            paymentMethod === 'Plin'
+                              ? 'bg-sky-600 hover:bg-sky-500 shadow-sky-600/30'
+                              : 'bg-purple-600 hover:bg-purple-500 shadow-purple-600/30'
+                          }`}
+                        >
+                          <ShieldCheck className="w-4 h-4" />
+                          <span>Pagar Ahora S/ {total.toFixed(2)}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* PESTAÑA 2: ESCANEAR QR + N° OPERACIÓN */}
+                  {yapePlinTab === 'qr' && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Tarjeta de Datos y QR */}
+                      <div className="space-y-4">
+                        <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3">
+                          <div>
+                            <span className="text-[11px] text-slate-400 block">Titular de la Cuenta:</span>
+                            <strong className="text-white text-sm">{ownerName}</strong>
+                          </div>
+
+                          <div className="flex items-center justify-between bg-slate-950 px-3.5 py-2.5 rounded-xl border border-slate-800">
+                            <div>
+                              <span className="text-[10px] text-slate-400 block">
+                                Número de {paymentMethod}:
+                              </span>
+                              <span
+                                className={`text-base font-black font-mono tracking-wider ${
+                                  paymentMethod === 'Plin' ? 'text-sky-300' : 'text-teal-300'
+                                }`}
+                              >
+                                {paymentMethod === 'Plin' ? plinNumber : yapeNumber}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleCopy(
+                                  paymentMethod === 'Plin' ? plinNumber : yapeNumber,
+                                  paymentMethod === 'Plin' ? 'plin' : 'yape'
+                                )
+                              }
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-all ${
+                                paymentMethod === 'Plin'
+                                  ? 'bg-sky-600/30 hover:bg-sky-600/50 text-sky-200 border-sky-500/40'
+                                  : 'bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border-purple-500/40'
+                              }`}
+                            >
+                              {copiedField === (paymentMethod === 'Plin' ? 'plin' : 'yape') ? (
+                                <Check className="w-3.5 h-3.5 text-teal-300" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                              <span>
+                                {copiedField === (paymentMethod === 'Plin' ? 'plin' : 'yape')
+                                  ? '¡Copiado!'
+                                  : 'Copiar Número'}
+                              </span>
+                            </button>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-1">
+                            <span className="text-xs text-slate-300">
+                              {paymentMethod === 'Plin' ? 'Total a Transferir:' : 'Total a Yapear:'}
+                            </span>
+                            <span
+                              className={`text-xl font-black font-mono ${
+                                paymentMethod === 'Plin' ? 'text-sky-300' : 'text-teal-300'
+                              }`}
+                            >
+                              S/ {total.toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* QR Dinámico Vectorial */}
+                        <div className="bg-white p-3 rounded-2xl flex flex-col items-center justify-center mx-auto w-fit shadow-xl">
+                          <img
+                            src={paymentMethod === 'Plin' ? plinQrUri : yapeQrUri}
+                            alt={`Código QR ${paymentMethod}`}
+                            className="w-40 h-40 rounded-lg"
+                          />
+                          <span className="text-[10px] font-bold text-slate-800 mt-1">
+                            Escanea desde tu app {paymentMethod}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Formulario de Operación y Voucher */}
+                      <div className="space-y-4 flex flex-col justify-between">
+                        <div className="space-y-4">
+                          <div className="pb-2 border-b border-slate-800">
+                            <span className="text-xs font-bold text-slate-200 uppercase tracking-wider block">
+                              Comprobación de Pago
+                            </span>
+                            <span className="text-[11px] text-slate-400">
+                              Ingresa el N° de operación o usa los botones de demostración rápida
+                            </span>
+                          </div>
+
+                          {/* N° Operación */}
+                          <div>
+                            <div className="flex justify-between items-center mb-1">
+                              <label className="text-xs font-semibold text-slate-300">
+                                Número de Operación {paymentMethod} *
+                              </label>
+                              <button
+                                type="button"
+                                onClick={handleGenerateDemoOp}
+                                className="text-[11px] text-orange-400 hover:text-orange-300 font-bold flex items-center gap-1 transition-all"
+                              >
+                                <Sparkles className="w-3 h-3" />
+                                Generar N° Demo
+                              </button>
+                            </div>
+                            <input
+                              type="text"
+                              value={operationNumber}
+                              onChange={(e) => setOperationNumber(e.target.value)}
+                              placeholder={paymentMethod === 'Plin' ? 'Ej. PLIN-948120' : 'Ej. OP-839214'}
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:outline-none focus:border-purple-500 transition-all"
+                            />
+                          </div>
+
+                          {/* Voucher Upload & Demo */}
+                          <div>
+                            <div className="flex justify-between items-center mb-1">
+                              <label className="text-xs font-semibold text-slate-300">
+                                Captura del Voucher (Opcional)
+                              </label>
+                              <button
+                                type="button"
+                                onClick={handleLoadDemoVoucher}
+                                className="text-[11px] text-teal-400 hover:text-teal-300 font-bold flex items-center gap-1 transition-all"
+                              >
+                                <Sparkles className="w-3 h-3" />
+                                Cargar Voucher de Prueba
+                              </button>
+                            </div>
+
+                            <label className="border-2 border-dashed border-slate-800 hover:border-purple-500/60 rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer bg-slate-950/40 hover:bg-purple-950/10 transition-all">
+                              <Upload className="w-6 h-6 text-slate-400 mb-1" />
+                              <span className="text-xs font-semibold text-slate-300">
+                                {voucherFileName || 'Seleccionar captura de voucher (.png / .jpg)'}
+                              </span>
+                              <span className="text-[10px] text-slate-400 mt-0.5">Máximo 5 MB</span>
+                              <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
+                            </label>
+                          </div>
+
+                          {/* Preview Voucher */}
+                          {voucherBase64 && (
+                            <div className="p-3 bg-slate-900 rounded-2xl border border-slate-800 flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <img
+                                  src={voucherBase64}
+                                  alt="Voucher"
+                                  className="w-10 h-14 object-cover rounded-lg border border-slate-700"
+                                />
+                                <div>
+                                  <span className="text-xs font-bold text-slate-200 block">Voucher Cargado</span>
+                                  <span className="text-[10px] text-emerald-400">Listo para verificación</span>
+                                </div>
+                              </div>
+                              <span className="text-xs text-teal-400 font-mono font-bold">{operationNumber}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="text-[11px] text-slate-400 bg-slate-950 p-3 rounded-xl border border-slate-800">
+                            Cuenta destino registrada: <br />
+                            <strong
+                              className={`font-mono ${
+                                paymentMethod === 'Plin' ? 'text-sky-300' : 'text-purple-300'
+                              }`}
+                            >
+                              {paymentMethod}: {paymentMethod === 'Plin' ? plinNumber : yapeNumber} ({ownerName})
+                            </strong>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={handleYapePlinQrSubmit}
+                            className={`w-full py-3 px-6 rounded-2xl font-black text-xs sm:text-sm text-white flex items-center justify-center gap-2 shadow-xl transition-all ${
+                              paymentMethod === 'Plin'
+                                ? 'bg-sky-600 hover:bg-sky-500 shadow-sky-600/30'
+                                : 'bg-purple-600 hover:bg-purple-500 shadow-purple-600/30'
+                            }`}
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Confirmar y Pagar S/ {total.toFixed(2)}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* VÍA 3: TRANSFERENCIA BANCARIA BCP / CCI CON CÓDIGO CIP 24H (US2 / T011-T012) */}
+              {paymentMethod === 'Transferencia Bancaria' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-950/60 p-5 rounded-3xl border border-blue-500/30">
+                  {/* Tarjeta Bancaria BCP + Código CIP */}
+                  <div className="space-y-4">
+                    <div className="pb-2 border-b border-slate-800 flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-bold text-blue-300 uppercase tracking-wider block">
+                          Transferencia Directa con Código CIP
+                        </span>
+                        <span className="text-[11px] text-slate-400">
+                          Abono a través de Banca Móvil BCP o Interbancario CCI
+                        </span>
+                      </div>
+                      <span className="px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[10px] font-bold flex items-center gap-1 font-mono">
+                        <Clock className="w-3 h-3" />
+                        {formatCountdown(cipSecondsLeft)}
+                      </span>
+                    </div>
+
+                    {/* Bloque Prominente de Código CIP + Temporizador 24h */}
+                    <div className="bg-amber-950/25 border border-amber-500/40 rounded-2xl p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] uppercase tracking-wider font-bold text-amber-300">
+                          Código de Pago CIP (Vigencia 24h)
+                        </span>
+                        <span className="text-[11px] font-mono font-bold text-amber-200 flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-amber-400" />
+                          Expira en {formatCountdown(cipSecondsLeft)}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between bg-slate-950/90 px-3.5 py-2.5 rounded-xl border border-amber-500/30">
+                        <span className="text-base sm:text-lg font-black font-mono text-amber-300 tracking-wider">
+                          {cipReference || 'CIP-2026-000000'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(cipReference, 'cip')}
+                          className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold flex items-center gap-1 shadow transition-all"
+                        >
+                          {copiedField === 'cip' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedField === 'cip' ? '¡Copiado!' : 'Copiar CIP'}</span>
+                        </button>
+                      </div>
                     </div>
 
                     {/* Tarjeta Estilo Bancario */}
@@ -1012,7 +1346,7 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
                     <div className="space-y-4">
                       <div className="pb-2 border-b border-slate-800">
                         <span className="text-xs font-bold text-slate-200 uppercase tracking-wider block">
-                          Comprobante de Transferencia
+                          Verificación Interbancaria Automática
                         </span>
                         <span className="text-[11px] text-slate-400">
                           Ingresa el N° de operación bancaria o usa el botón demo
@@ -1045,7 +1379,7 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
                       <div>
                         <div className="flex justify-between items-center mb-1">
                           <label className="text-xs font-semibold text-slate-300">
-                            Constancia de Transferencia (Voucher) *
+                            Constancia de Transferencia (Opcional)
                           </label>
                           <button
                             type="button"
@@ -1073,7 +1407,7 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
                             <img src={voucherBase64} alt="Voucher BCP" className="w-10 h-14 object-cover rounded-lg border border-slate-700" />
                             <div>
                               <span className="text-xs font-bold text-slate-200 block">Comprobante BCP Cargado</span>
-                              <span className="text-[10px] text-emerald-400">Correcto</span>
+                              <span className="text-[10px] text-emerald-400">Listo para conciliación</span>
                             </div>
                           </div>
                           <span className="text-xs text-orange-400 font-mono font-bold">{operationNumber}</span>
@@ -1081,17 +1415,29 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
                       )}
                     </div>
 
-                    <div className="text-[11px] text-slate-400 bg-slate-950 p-3 rounded-xl border border-slate-800">
-                      Cuenta destino registrada: <br />
-                      <strong className="text-blue-300 font-mono">
-                        {bankName} Cta: {bankAccountSoles} ({ownerName})
-                      </strong>
+                    <div className="space-y-3">
+                      <div className="text-[11px] text-slate-400 bg-slate-950 p-3 rounded-xl border border-slate-800">
+                        Cuenta destino registrada: <br />
+                        <strong className="text-blue-300 font-mono">
+                          {bankName} Cta: {bankAccountSoles} ({ownerName})
+                        </strong>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleReserveCip}
+                        disabled={isSubmitting}
+                        className="w-full py-2.5 px-4 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 font-bold text-xs flex items-center justify-center gap-2 transition-all"
+                      >
+                        <Clock className="w-3.5 h-3.5" />
+                        <span>Generar Reserva CIP (24h) para pagar luego</span>
+                      </button>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* VÍA 4: TARJETA DE CRÉDITO/DÉBITO SANDBOX (US3 / T016-T019) */}
+              {/* VÍA 4: TARJETA DE CRÉDITO/DÉBITO SANDBOX (US3 / T014-T015) */}
               {paymentMethod === 'Tarjeta Crédito/Débito' && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-950/60 p-5 rounded-3xl border border-emerald-500/30">
                   {/* Tarjeta Visual 3D */}
@@ -1159,10 +1505,10 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
                       <span className="text-xs font-bold text-slate-200 uppercase tracking-wider block">
                         Datos del Plástico
                       </span>
-                      <span className="text-[11px] text-slate-400">Ambiente de pruebas activo (aprobación automática)</span>
+                      <span className="text-[11px] text-slate-400">Validación Luhn en vivo y autorización 3D Secure (1.5s)</span>
                     </div>
 
-                    {/* Número */}
+                    {/* Número con validación Luhn en vivo */}
                     <div>
                       <label className="block text-xs font-semibold text-slate-300 mb-1">
                         Número de Tarjeta (16 dígitos) *
@@ -1174,7 +1520,15 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
                         placeholder="4242 4242 4242 4242"
                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:outline-none focus:border-emerald-500 transition-all"
                       />
-                      {cardErrors.number && <p className="text-[11px] text-rose-400 mt-1">{cardErrors.number}</p>}
+                      {cardData.number.replace(/\s/g, '').length === 16 ? (
+                        luhn(cardData.number.replace(/\s/g, '')) ? (
+                          <p className="text-[11px] text-emerald-400 mt-1 font-semibold">✓ Número válido</p>
+                        ) : (
+                          <p className="text-[11px] text-rose-400 mt-1 font-semibold">✗ Número de tarjeta inválido (Luhn)</p>
+                        )
+                      ) : (
+                        cardErrors.number && <p className="text-[11px] text-rose-400 mt-1">{cardErrors.number}</p>
+                      )}
                     </div>
 
                     {/* Titular */}
@@ -1206,7 +1560,15 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
                           placeholder="12/28"
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:outline-none focus:border-emerald-500 transition-all"
                         />
-                        {cardErrors.expiry && <p className="text-[11px] text-rose-400 mt-1">{cardErrors.expiry}</p>}
+                        {cardData.expiry.length === 5 ? (
+                          isValidExpiry(cardData.expiry) ? (
+                            <p className="text-[11px] text-emerald-400 mt-1 font-semibold">✓ Fecha vigente</p>
+                          ) : (
+                            <p className="text-[11px] text-rose-400 mt-1 font-semibold">✗ Fecha expirada o inválida</p>
+                          )
+                        ) : (
+                          cardErrors.expiry && <p className="text-[11px] text-rose-400 mt-1">{cardErrors.expiry}</p>
+                        )}
                       </div>
 
                       <div>
@@ -1217,11 +1579,24 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
                           type="password"
                           maxLength={4}
                           value={cardData.cvv}
-                          onChange={(e) => setCardData({ ...cardData, cvv: e.target.value.replace(/\D/g, '') })}
+                          onChange={(e) => {
+                            setCardData({ ...cardData, cvv: e.target.value.replace(/\D/g, '') });
+                            if (cardErrors.cvv) {
+                              setCardErrors((prev) => ({ ...prev, cvv: undefined }));
+                            }
+                          }}
                           placeholder="123"
                           className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:outline-none focus:border-emerald-500 transition-all"
                         />
-                        {cardErrors.cvv && <p className="text-[11px] text-rose-400 mt-1">{cardErrors.cvv}</p>}
+                        {cardData.cvv.length > 0 ? (
+                          /^\d{3,4}$/.test(cardData.cvv) ? (
+                            <p className="text-[11px] text-emerald-400 mt-1 font-semibold">✓ CVV válido</p>
+                          ) : (
+                            <p className="text-[11px] text-rose-400 mt-1 font-semibold">✗ Debe tener 3 o 4 dígitos</p>
+                          )
+                        ) : (
+                          cardErrors.cvv && <p className="text-[11px] text-rose-400 mt-1">{cardErrors.cvv}</p>
+                        )}
                       </div>
                     </div>
 
@@ -1257,38 +1632,50 @@ export default function CheckoutModal({ isOpen, onClose, storeSettings, currentU
                   <span>Volver a Datos del Comprador</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={handleSubmitPayment}
-                  disabled={isSubmitting}
-                  className={`py-3 px-6 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl transition-all w-full sm:w-auto ${
-                    isSubmitting
-                      ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                      : paymentMethod === 'Tarjeta Crédito/Débito'
-                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
-                      : 'bg-orange-600 hover:bg-orange-500 text-white shadow-orange-600/30'
-                  }`}
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Procesando Pago Seguro...</span>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>
-                        Confirmar y Pagar S/ {total.toFixed(2)}{' '}
-                        {paymentMethod === 'Tarjeta Crédito/Débito' ? 'con Tarjeta' : `vía ${paymentMethod}`}
-                      </span>
-                    </>
-                  )}
-                </button>
+                {(paymentMethod === 'Transferencia Bancaria' || paymentMethod === 'Tarjeta Crédito/Débito') && (
+                  <button
+                    type="button"
+                    onClick={handleSubmitPayment}
+                    disabled={isSubmitting}
+                    className={`py-3 px-6 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl transition-all w-full sm:w-auto ${
+                      isSubmitting
+                        ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                        : paymentMethod === 'Tarjeta Crédito/Débito'
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
+                        : 'bg-orange-600 hover:bg-orange-500 text-white shadow-orange-600/30'
+                    }`}
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Procesando Pago Seguro...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>
+                          Confirmar y Pagar S/ {total.toFixed(2)}{' '}
+                          {paymentMethod === 'Tarjeta Crédito/Débito' ? 'con Tarjeta' : `vía ${paymentMethod}`}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           )}
         </div>
       </div>
+
+      {/* Modal Animado de Verificación Automática (Feature 004) */}
+      <AutoVerifyModal
+        isOpen={autoVerifyOpen}
+        method={autoVerifyPayload?.modalMethod || 'yape_plin'}
+        ownerName={ownerName}
+        verifyFn={() => api.autoVerifyPayment(autoVerifyPayload?.requestData)}
+        onSuccess={handleAutoVerifySuccess}
+        onError={handleAutoVerifyError}
+      />
     </div>
   );
 }

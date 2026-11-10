@@ -595,6 +595,10 @@ export default function ProfileView() {
           order={selectedReceiptOrder}
           storeSettings={storeSettings}
           onClose={() => setSelectedReceiptOrder(null)}
+          onOrderUpdated={(updatedOrder) => {
+            setSelectedReceiptOrder(updatedOrder);
+            if (currentUser?.id) loadUserOrders(currentUser.id);
+          }}
           onGoToOrders={() => setSelectedReceiptOrder(null)}
           onContinueShopping={() => setSelectedReceiptOrder(null)}
         />
