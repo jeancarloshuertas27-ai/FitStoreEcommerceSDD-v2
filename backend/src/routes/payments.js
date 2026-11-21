@@ -37,20 +37,79 @@ function getStoreSettings() {
 
 function resolveUserId(explicitUserId, customerDni) {
   if (explicitUserId) {
-    const foundById = db.prepare('SELECT id FROM users WHERE id = ?').get(Number(explicitUserId));
+    const foundById = db.prepare("SELECT id FROM users WHERE id = ? AND role = 'client'").get(Number(explicitUserId));
     if (foundById) return Number(foundById.id);
   }
 
   if (customerDni) {
-    const foundByDni = db.prepare('SELECT id FROM users WHERE dni = ?').get(String(customerDni).trim());
+    const foundByDni = db.prepare("SELECT id FROM users WHERE dni = ? AND role = 'client'").get(String(customerDni).trim());
     if (foundByDni) return Number(foundByDni.id);
   }
 
-  const defaultDemo = db.prepare('SELECT id FROM users WHERE id = 2').get();
-  if (defaultDemo) return 2;
+  throw new HttpError(
+    401,
+    'AUTH_REQUIRED',
+    'Debes iniciar sesión o crear una cuenta de cliente para completar tu compra.'
+  );
+}
 
-  const firstUser = db.prepare('SELECT id FROM users ORDER BY id ASC LIMIT 1').get();
-  return firstUser ? Number(firstUser.id) : 1;
+function resolveShipping(body) {
+  const raw = body.shipping_rate_id ?? body.shipping?.rate_id ?? body.shipping?.id;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const rate = db.prepare('SELECT * FROM shipping_rates WHERE id = ? AND active = 1').get(Number(raw));
+  if (!rate) {
+    throw new HttpError(
+      409,
+      'SHIPPING_UNAVAILABLE',
+      'Envíos no disponibles temporalmente para esta provincia. Elige otro destino o contacta a soporte.'
+    );
+  }
+  return rate;
+}
+
+function getMercadoPagoConfig() {
+  const accessToken = process.env.MP_ACCESS_TOKEN;
+  const publicKey = process.env.MP_PUBLIC_KEY;
+  if (!accessToken) {
+    throw new HttpError(
+      503,
+      'MP_NOT_CONFIGURED',
+      'Mercado Pago no está configurado en el servidor. Usa Yape/Plin u otro medio de pago.'
+    );
+  }
+  return { accessToken, publicKey: publicKey || null };
+}
+
+async function mercadoPagoFetch(url, options = {}) {
+  const { accessToken } = getMercadoPagoConfig();
+  let response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      },
+      signal: AbortSignal.timeout(12000),
+    });
+  } catch (err) {
+    throw new HttpError(
+      502,
+      'MP_UNREACHABLE',
+      'No se pudo conectar temporalmente con la pasarela de pagos. Por favor intenta nuevamente o usa Yape/Plin.'
+    );
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    console.error('[MercadoPago] Error API:', response.status, JSON.stringify(data).slice(0, 500));
+    throw new HttpError(
+      response.status === 404 ? 404 : 502,
+      'MP_API_ERROR',
+      data?.message || 'Mercado Pago rechazó la solicitud.'
+    );
+  }
+  return data;
 }
 
 function generateNextOrderCode() {
@@ -179,6 +238,8 @@ function createOrderAndPaymentAtomically({
   voucherImage,
   cardLast4,
   authCode,
+  shippingRate = null,
+  shouldDeductStock = true,
 }) {
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -221,7 +282,9 @@ function createOrderAndPaymentAtomically({
         );
       }
 
-      const updateRes = deductStock.run(quantity, productId, quantity);
+      const updateRes = shouldDeductStock
+        ? deductStock.run(quantity, productId, quantity)
+        : { changes: 1 };
       if (updateRes.changes === 0) {
         throw new HttpError(
           409,
@@ -246,8 +309,10 @@ function createOrderAndPaymentAtomically({
       });
     }
 
-    const finalTotal =
-      total !== undefined && total !== null && !Number.isNaN(Number(total))
+    const shippingCost = shippingRate ? Number(Number(shippingRate.cost).toFixed(2)) : 0;
+    const finalTotal = shippingRate
+      ? Number((computedTotal + shippingCost).toFixed(2))
+      : total !== undefined && total !== null && !Number.isNaN(Number(total))
         ? Number(Number(total).toFixed(2))
         : Number(computedTotal.toFixed(2));
 
@@ -255,8 +320,9 @@ function createOrderAndPaymentAtomically({
 
     const insertOrder = db.prepare(`
       INSERT INTO orders (
-        order_code, user_id, customer_name, customer_dni, customer_phone, shipping_address, total, order_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        order_code, user_id, customer_name, customer_dni, customer_phone, shipping_address, total, order_status,
+        shipping_cost, shipping_department, shipping_province
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const orderResult = insertOrder.run(
       orderCode,
@@ -266,7 +332,10 @@ function createOrderAndPaymentAtomically({
       customerPhone,
       shippingAddress,
       finalTotal,
-      orderStatus
+      orderStatus,
+      shippingCost,
+      shippingRate ? shippingRate.department : '',
+      shippingRate ? shippingRate.province : ''
     );
     const orderId = Number(orderResult.lastInsertRowid);
 
@@ -494,12 +563,13 @@ export function expireOverdueCipOrders() {
 }
 
 // POST /api/payments/auto-verify - Motor de Verificación Automática e Instantánea de Pagos
-router.post('/auto-verify', (req, res) => {
+function autoVerifyHandler(req, res) {
   try {
     // Expirar reservas CIP vencidas antes de validar pagos o reservas
     expireOverdueCipOrders();
 
     const body = req.body || {};
+    const shippingRate = resolveShipping(body);
     const { kind, subMethod } = normalizeMethod(body.method, body.sub_method);
 
     if (!kind) {
@@ -530,15 +600,15 @@ router.post('/auto-verify', (req, res) => {
         if (!validatePhone(phoneToValidate)) {
           throw new HttpError(
             400,
-            'INVALID_FORMAT',
-            'El número celular registrado en Yape/Plin debe contener exactamente 9 dígitos numéricos.'
+            'INVALID_PHONE',
+            'El número celular debe tener 9 dígitos y comenzar con 9.'
           );
         }
         if (!validateOTP(body.otp_code)) {
           throw new HttpError(
             400,
-            'INVALID_FORMAT',
-            'El código de aprobación de Yape/Plin debe contener exactamente 6 dígitos numéricos válidos (no secuencias repetidas como 000000).'
+            'INVALID_OTP',
+            'Código de aprobación inválido o trivial (ej. 000000, 111111, 123456). Ingrese un código OTP legítimo de 6 dígitos.'
           );
         }
         operationNumber = String(body.otp_code).trim();
@@ -568,6 +638,7 @@ router.post('/auto-verify', (req, res) => {
       const authCode = generateUniqueAuthCode(generateYapeHash);
 
       const result = createOrderAndPaymentAtomically({
+        shippingRate,
         userId,
         customerName,
         customerDni,
@@ -585,6 +656,10 @@ router.post('/auto-verify', (req, res) => {
         authCode,
       });
 
+const sanitizeCustomerPayment = (payment) =>
+  payment ? { ...payment, destination_account: 'Pasarela FitStore Pro' } : null;
+
+      const publicPayment = sanitizeCustomerPayment(result.payment);
       return res.status(201).json({
         success: true,
         message: '¡Pago verificado automáticamente! Orden aprobada.',
@@ -594,12 +669,12 @@ router.post('/auto-verify', (req, res) => {
           ...result.order,
           auto_verified: true,
           items: result.items,
-          payment: result.payment,
+          payment: publicPayment,
         },
-        payment: result.payment,
+        payment: publicPayment,
         audit: {
           channel: 'Cámara de Compensación Yape / Plin',
-          beneficiary: settings.owner_name,
+          beneficiary: 'FitStore Pro',
           verified_at: new Date().toISOString(),
         },
       });
@@ -625,6 +700,7 @@ router.post('/auto-verify', (req, res) => {
           : generateUniqueAuthCode(generateCipReference);
 
         const result = createOrderAndPaymentAtomically({
+        shippingRate,
           userId,
           customerName,
           customerDni,
@@ -706,6 +782,7 @@ router.post('/auto-verify', (req, res) => {
           total: body.total,
         });
 
+        const publicPayment = { ...result.payment, destination_account: 'Pasarela FitStore Pro' };
         return res.status(200).json({
           success: true,
           message: '¡Transferencia bancaria verificada automáticamente! Orden aprobada.',
@@ -715,12 +792,12 @@ router.post('/auto-verify', (req, res) => {
             ...result.order,
             auto_verified: true,
             items: result.items,
-            payment: result.payment,
+            payment: publicPayment,
           },
-          payment: result.payment,
+          payment: publicPayment,
           audit: {
-            channel: 'Canal Interbancario BCP / CCI',
-            beneficiary: settings.owner_name,
+            channel: 'Canal Interbancario CIP',
+            beneficiary: 'FitStore Pro',
             verified_at: new Date().toISOString(),
           },
         });
@@ -733,6 +810,7 @@ router.post('/auto-verify', (req, res) => {
       const authCode = generateUniqueAuthCode(generateCipHash);
 
       const result = createOrderAndPaymentAtomically({
+        shippingRate,
         userId,
         customerName,
         customerDni,
@@ -750,6 +828,7 @@ router.post('/auto-verify', (req, res) => {
         authCode,
       });
 
+      const publicBankPayment = { ...result.payment, destination_account: 'Pasarela FitStore Pro' };
       return res.status(201).json({
         success: true,
         message: '¡Transferencia bancaria verificada automáticamente! Orden aprobada.',
@@ -760,12 +839,12 @@ router.post('/auto-verify', (req, res) => {
           ...result.order,
           auto_verified: true,
           items: result.items,
-          payment: result.payment,
+          payment: publicBankPayment,
         },
-        payment: result.payment,
+        payment: publicBankPayment,
         audit: {
-          channel: 'Canal Interbancario BCP / CCI',
-          beneficiary: settings.owner_name,
+          channel: 'Canal Interbancario CIP',
+          beneficiary: 'FitStore Pro',
           verified_at: new Date().toISOString(),
         },
       });
@@ -817,6 +896,7 @@ router.post('/auto-verify', (req, res) => {
       const destinationAccount = `Cuenta Recaudadora BCP: ${settings.bank_account_soles} (${settings.owner_name})`;
 
       const result = createOrderAndPaymentAtomically({
+        shippingRate,
         userId,
         customerName,
         customerDni,
@@ -834,21 +914,22 @@ router.post('/auto-verify', (req, res) => {
         authCode,
       });
 
+      const publicCardPayment = { ...result.payment, destination_account: 'Pasarela FitStore Pro' };
       return res.status(201).json({
         success: true,
-        message: '¡Cobro con tarjeta autorizado! Liquidado a cuenta del titular.',
+        message: '¡Cobro con tarjeta autorizado correctamente!',
         order_id: result.order.id,
         order_code: result.order.order_code,
         order: {
           ...result.order,
           auto_verified: true,
           items: result.items,
-          payment: result.payment,
+          payment: publicCardPayment,
         },
-        payment: result.payment,
+        payment: publicCardPayment,
         audit: {
           channel: 'Procesador Tarjeta 3D Secure',
-          beneficiary: settings.owner_name,
+          beneficiary: 'FitStore Pro',
           verified_at: new Date().toISOString(),
         },
       });
@@ -867,6 +948,273 @@ router.post('/auto-verify', (req, res) => {
       error: 'INTERNAL_ERROR',
       message: 'Ocurrió un error interno al verificar automáticamente el pago.',
     });
+  }
+}
+router.post('/auto-verify', autoVerifyHandler);
+
+// POST /api/payments/yape-plin - Pago directo Yape/Plin (celular 9 dígitos + OTP 6 dígitos) con validación antifraude
+router.post('/yape-plin', (req, res) => {
+  const body = req.body || {};
+  const rawSub = String(body.sub_method || body.payment_method || body.method || 'yape').toLowerCase();
+  req.body = {
+    ...body,
+    method: 'yape_plin',
+    mode: 'otp',
+    verification_mode: 'otp',
+    sub_method: rawSub === 'plin' ? 'plin' : 'yape',
+    otp_code: body.otp_code ?? body.otp,
+  };
+  return autoVerifyHandler(req, res);
+});
+
+function sendHttpError(res, error, fallbackMessage) {
+  if (error instanceof HttpError) {
+    return res.status(error.status).json({ success: false, error: error.code, message: error.message });
+  }
+  console.error(fallbackMessage, error);
+  return res.status(500).json({ success: false, error: 'INTERNAL_ERROR', message: fallbackMessage });
+}
+
+function getPublicBaseUrl(candidate) {
+  try {
+    const url = new URL(String(candidate || ''));
+    if (url.protocol === 'http:' || url.protocol === 'https:') return url.origin;
+  } catch {
+    // ignorar
+  }
+  return process.env.PUBLIC_STORE_URL || 'http://localhost:5173';
+}
+
+// POST /api/payments/create-preference - Mercado Pago Checkout Pro (Sandbox, PEN)
+router.post('/create-preference', async (req, res) => {
+  let createdOrderId = null;
+  try {
+    getMercadoPagoConfig();
+    const body = req.body || {};
+    const { customerName, customerDni, customerPhone, shippingAddress, items, total } =
+      extractBuyerAndItems(body);
+    const userId = resolveUserId(body.user_id, customerDni);
+    const shippingRate = resolveShipping(body);
+    if (!shippingRate) {
+      throw new HttpError(400, 'INVALID_FORMAT', 'Debes seleccionar el departamento/provincia de envío.');
+    }
+
+    // El stock se valida pero NO se descuenta hasta que Mercado Pago confirme 'approved'
+    const result = createOrderAndPaymentAtomically({
+      shippingRate,
+      shouldDeductStock: false,
+      userId,
+      customerName,
+      customerDni,
+      customerPhone,
+      shippingAddress,
+      items,
+      total,
+      orderStatus: 'Pendiente de Pago',
+      paymentStatus: 'Pendiente (Mercado Pago)',
+      methodLabel: 'Mercado Pago',
+      destinationAccount: 'Pasarela FitStore Pro',
+      operationNumber: null,
+      voucherImage: null,
+      cardLast4: null,
+      authCode: `MP-${globalThis.crypto.randomUUID().slice(0, 8).toUpperCase()}`,
+    });
+    createdOrderId = result.order.id;
+
+    const user = db.prepare('SELECT email FROM users WHERE id = ?').get(userId);
+    const baseUrl = getPublicBaseUrl(body.return_url);
+    const backUrl = `${baseUrl}/?mp_return=1`;
+    const preferencePayload = {
+      items: [
+        ...result.items.map((it) => ({
+          id: String(it.product_id),
+          title: it.product_name,
+          quantity: it.quantity,
+          unit_price: Number(it.unit_price),
+          currency_id: 'PEN',
+        })),
+        {
+          id: `ENVIO-${shippingRate.id}`,
+          title: `Costo de Envío - ${shippingRate.province} (${shippingRate.department})`,
+          quantity: 1,
+          unit_price: Number(shippingRate.cost),
+          currency_id: 'PEN',
+        },
+      ].filter((it) => it.unit_price > 0),
+      payer: { name: customerName, email: user?.email },
+      external_reference: result.order.order_code,
+      back_urls: { success: backUrl, failure: backUrl, pending: backUrl },
+      statement_descriptor: 'FITSTORE',
+    };
+    if (baseUrl.startsWith('https://')) preferencePayload.auto_return = 'approved';
+    const notifyBase = process.env.PUBLIC_API_URL;
+    if (notifyBase && notifyBase.startsWith('https://')) {
+      preferencePayload.notification_url = `${notifyBase.replace(/\/$/, '')}/api/payments/mercadopago-webhook`;
+    }
+
+    let preference;
+    try {
+      preference = await mercadoPagoFetch('https://api.mercadopago.com/checkout/preferences', {
+        method: 'POST',
+        body: JSON.stringify(preferencePayload),
+      });
+    } catch (mpError) {
+      db.prepare("UPDATE orders SET order_status = 'Cancelado' WHERE id = ?").run(createdOrderId);
+      db.prepare("UPDATE payments SET payment_status = 'Rechazado' WHERE order_id = ?").run(createdOrderId);
+      throw mpError;
+    }
+
+    return res.status(201).json({
+      success: true,
+      order_id: result.order.id,
+      order_code: result.order.order_code,
+      total: result.order.total,
+      shipping_cost: result.order.shipping_cost,
+      preference_id: preference.id,
+      init_point: preference.init_point,
+      sandbox_init_point: preference.sandbox_init_point,
+      public_key: process.env.MP_PUBLIC_KEY || null,
+    });
+  } catch (error) {
+    return sendHttpError(res, error, 'Error al crear la preferencia de pago de Mercado Pago.');
+  }
+});
+
+/**
+ * Confirma de forma atómica e idempotente un pago aprobado de Mercado Pago:
+ * valida monto/moneda, descuenta stock, marca la orden 'Pagado / En Preparación'
+ * y registra el payment_id como número de operación único.
+ */
+function approveMercadoPagoPayment(mpPayment) {
+  const orderCode = String(mpPayment.external_reference || '').trim();
+  const mpPaymentId = String(mpPayment.id);
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const order = db.prepare('SELECT * FROM orders WHERE order_code = ?').get(orderCode);
+    if (!order) {
+      throw new HttpError(404, 'ORDER_NOT_FOUND', 'No se encontró la orden asociada a este pago.');
+    }
+    const payment = db.prepare('SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1').get(order.id);
+    if (!payment) {
+      throw new HttpError(404, 'PAYMENT_NOT_FOUND', 'No se encontró el registro de pago de la orden.');
+    }
+
+    const loadItems = () => db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
+
+    if (payment.payment_status === 'Aprobado') {
+      db.exec('COMMIT');
+      return { order, payment, items: loadItems(), alreadyApproved: true };
+    }
+    if (order.order_status === 'Cancelado') {
+      throw new HttpError(409, 'ORDER_CANCELLED', 'Esta orden fue cancelada y no puede ser pagada.');
+    }
+    if (mpPayment.currency_id && mpPayment.currency_id !== 'PEN') {
+      throw new HttpError(400, 'AMOUNT_MISMATCH', 'La moneda del pago no coincide (se esperaba PEN).');
+    }
+    if (Math.abs(Number(mpPayment.transaction_amount) - Number(order.total)) > 0.01) {
+      throw new HttpError(
+        400,
+        'AMOUNT_MISMATCH',
+        `El monto cobrado (S/ ${Number(mpPayment.transaction_amount).toFixed(2)}) no coincide con el total de la orden (S/ ${Number(order.total).toFixed(2)}).`
+      );
+    }
+    assertNoDuplicateOperation(mpPaymentId, null);
+
+    const items = loadItems();
+    const stockOk = items.every((it) => {
+      const p = db.prepare('SELECT stock FROM products WHERE id = ?').get(it.product_id);
+      return p && p.stock >= it.quantity;
+    });
+
+    let finalStatus = 'Pagado / En Preparación';
+    if (stockOk) {
+      const deduct = db.prepare('UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?');
+      for (const it of items) deduct.run(it.quantity, it.product_id, it.quantity);
+    } else {
+      // Pago cobrado pero sin stock: se marca para revisión manual sin dejar stock negativo
+      finalStatus = 'Pagado / Revisión de Stock';
+    }
+
+    db.prepare('UPDATE orders SET order_status = ? WHERE id = ?').run(finalStatus, order.id);
+    db.prepare(`
+      UPDATE payments
+      SET payment_status = 'Aprobado', operation_number = ?, method = 'Mercado Pago'
+      WHERE id = ?
+    `).run(mpPaymentId, payment.id);
+
+    const updatedOrder = db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id);
+    const updatedPayment = db.prepare('SELECT * FROM payments WHERE id = ?').get(payment.id);
+    db.exec('COMMIT');
+    return { order: updatedOrder, payment: updatedPayment, items, alreadyApproved: false };
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK');
+    } catch (_) {
+      // sin transacción activa
+    }
+    throw err;
+  }
+}
+
+// POST /api/payments/verify-mercadopago - Verificación de retorno (back_urls) contra la API de Mercado Pago
+router.post('/verify-mercadopago', async (req, res) => {
+  try {
+    const paymentId = String(req.body?.payment_id ?? '').trim();
+    if (!/^\d{3,20}$/.test(paymentId)) {
+      throw new HttpError(400, 'INVALID_FORMAT', 'El identificador de pago de Mercado Pago es inválido.');
+    }
+
+    const mpPayment = await mercadoPagoFetch(
+      `https://api.mercadopago.com/v1/payments/${encodeURIComponent(paymentId)}`
+    );
+
+    if (mpPayment.status === 'pending' || mpPayment.status === 'in_process') {
+      return res.status(202).json({
+        success: false,
+        pending: true,
+        status: mpPayment.status,
+        message: 'Tu pago está en verificación. Te avisaremos en cuanto la entidad bancaria lo confirme.',
+      });
+    }
+    if (mpPayment.status !== 'approved') {
+      return res.status(402).json({
+        success: false,
+        error: 'PAYMENT_NOT_APPROVED',
+        status: mpPayment.status,
+        message: 'El pago no fue aprobado por Mercado Pago. No se realizó ningún cobro; intenta con otro medio de pago.',
+      });
+    }
+
+    const result = approveMercadoPagoPayment(mpPayment);
+    const publicPayment = { ...result.payment, destination_account: 'Pasarela FitStore Pro' };
+    return res.status(200).json({
+      success: true,
+      message: '¡Pago con Mercado Pago verificado! Orden aprobada.',
+      already_processed: result.alreadyApproved,
+      order_id: result.order.id,
+      order_code: result.order.order_code,
+      order: { ...result.order, auto_verified: true, items: result.items, payment: publicPayment },
+      payment: publicPayment,
+      audit: { channel: 'Mercado Pago Checkout Pro', beneficiary: 'FitStore Pro', verified_at: new Date().toISOString() },
+    });
+  } catch (error) {
+    return sendHttpError(res, error, 'Error al verificar el pago de Mercado Pago.');
+  }
+});
+
+// POST /api/payments/mercadopago-webhook - Notificaciones IPN asíncronas (idempotente)
+router.post('/mercadopago-webhook', async (req, res) => {
+  // Responder 200 de inmediato para evitar reintentos innecesarios de Mercado Pago
+  res.status(200).json({ received: true });
+  try {
+    const type = String(req.body?.type || req.query?.type || req.query?.topic || '');
+    const id = req.body?.data?.id || req.query?.['data.id'] || req.query?.id;
+    if (type !== 'payment' || !id || !/^\d{3,20}$/.test(String(id))) return;
+    const mpPayment = await mercadoPagoFetch(`https://api.mercadopago.com/v1/payments/${id}`);
+    if (mpPayment.status === 'approved') approveMercadoPagoPayment(mpPayment);
+  } catch (error) {
+    console.error('[MercadoPago Webhook] No se pudo procesar la notificación:', error?.message || error);
   }
 });
 

@@ -3,72 +3,92 @@ import api from '../services/api.js';
 
 const UserContext = createContext();
 
-const ACTIVE_USER_KEY = 'fitstore_active_user_id';
+const SESSION_KEY = 'fitstore_customer_session';
 
 export function UserProvider({ children }) {
-  const [users, setUsers] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const loadUsers = async () => {
-    try {
-      setLoading(true);
-      const data = await api.getUsers();
-      setUsers(data);
-
-      const savedUserId = localStorage.getItem(ACTIVE_USER_KEY);
-      const targetId = savedUserId ? parseInt(savedUserId, 10) : 2; // Cliente demo 1 por defecto (Carlos Mendoza)
-      
-      const found = data.find((u) => u.id === targetId) || data.find((u) => u.role === 'client') || data[0];
-      setCurrentUser(found);
-    } catch (err) {
-      console.error('Error al cargar usuarios:', err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Restaurar sesión real solo si el usuario ya inició sesión previamente
   useEffect(() => {
-    loadUsers();
+    let mounted = true;
+
+    const restoreSession = async () => {
+      try {
+        const raw = localStorage.getItem(SESSION_KEY);
+        if (!raw) {
+          if (mounted) setLoading(false);
+          return;
+        }
+        const parsed = JSON.parse(raw);
+        if (!parsed?.id) {
+          localStorage.removeItem(SESSION_KEY);
+          if (mounted) setLoading(false);
+          return;
+        }
+
+        const freshUser = await api.getUserById(parsed.id);
+        if (mounted && freshUser && freshUser.role === 'client') {
+          setCurrentUser(freshUser);
+          localStorage.setItem(SESSION_KEY, JSON.stringify(freshUser));
+        } else {
+          localStorage.removeItem(SESSION_KEY);
+        }
+      } catch {
+        localStorage.removeItem(SESSION_KEY);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    restoreSession();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  const switchUser = (userId) => {
-    const user = users.find((u) => u.id === parseInt(userId, 10));
-    if (user) {
-      setCurrentUser(user);
-      localStorage.setItem(ACTIVE_USER_KEY, user.id.toString());
-    }
+  const login = async (email, password) => {
+    setError(null);
+    const res = await api.loginClient({ email, password });
+    const user = res.user || res;
+    setCurrentUser(user);
+    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    return user;
+  };
+
+  const register = async (newUserData) => {
+    setError(null);
+    const res = await api.registerClient(newUserData);
+    const created = res.user || res;
+    setCurrentUser(created);
+    localStorage.setItem(SESSION_KEY, JSON.stringify(created));
+    return created;
+  };
+
+  const logout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem(SESSION_KEY);
   };
 
   const updateCurrentUser = async (userData) => {
-    if (!currentUser) return;
+    if (!currentUser) return null;
     const updated = await api.updateUser(currentUser.id, userData);
     setCurrentUser(updated);
-    setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+    localStorage.setItem(SESSION_KEY, JSON.stringify(updated));
     return updated;
-  };
-
-  const registerUser = async (newUserData) => {
-    const created = await api.createUser(newUserData);
-    setUsers((prev) => [...prev, created]);
-    setCurrentUser(created);
-    localStorage.setItem(ACTIVE_USER_KEY, created.id.toString());
-    return created;
   };
 
   return (
     <UserContext.Provider
       value={{
-        users,
         currentUser,
         loading,
         error,
-        switchUser,
+        login,
+        register,
+        logout,
         updateCurrentUser,
-        registerUser,
-        refreshUsers: loadUsers,
       }}
     >
       {children}
@@ -85,4 +105,3 @@ export function useUser() {
 }
 
 export default UserContext;
-

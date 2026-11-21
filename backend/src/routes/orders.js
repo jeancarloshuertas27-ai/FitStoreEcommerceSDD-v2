@@ -27,10 +27,17 @@ router.get('/user/:userId', (req, res) => {
         ORDER BY id DESC LIMIT 1
       `).get(order.id);
 
+      const safePayment = payment
+        ? {
+            ...payment,
+            destination_account: 'Pasarela FitStore Pro'
+          }
+        : null;
+
       return {
         ...order,
         items,
-        payment: payment || null
+        payment: safePayment
       };
     });
 
@@ -53,11 +60,17 @@ router.get('/:id', (req, res) => {
 
     const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
     const payment = db.prepare('SELECT * FROM payments WHERE order_id = ? ORDER BY id DESC LIMIT 1').get(order.id);
+    const safePayment = payment
+      ? {
+          ...payment,
+          destination_account: 'Pasarela FitStore Pro'
+        }
+      : null;
 
     res.json({
       ...order,
       items,
-      payment: payment || null
+      payment: safePayment
     });
   } catch (error) {
     console.error('Error al obtener pedido:', error);
@@ -268,7 +281,13 @@ router.put('/:id/payment', (req, res) => {
       newOrderStatus = 'Cancelado';
       // Reversión atómica de stock solo si el pedido no estaba ya cancelado o expirado
       if (order.order_status !== 'Cancelado' && order.order_status !== 'Expirado') {
-        const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(id);
+        const mpPending = db
+          .prepare("SELECT 1 FROM payments WHERE order_id = ? AND payment_status = 'Pendiente (Mercado Pago)' LIMIT 1")
+          .get(id);
+        const items =
+          mpPending || order.order_status === 'Pagado / Revisión de Stock'
+            ? []
+            : db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(id);
         const updateStock = db.prepare(`
           UPDATE products
           SET stock = stock + ?
@@ -310,6 +329,7 @@ router.put('/:id/status', (req, res) => {
       'Pendiente de Pago',
       'En Verificación',
       'Pagado / En Preparación',
+      'Pagado / Revisión de Stock',
       'Enviado',
       'Entregado',
       'Cancelado',
@@ -366,12 +386,17 @@ router.post('/:id/cancel', (req, res) => {
         });
       }
 
+      const mpPending = db
+        .prepare("SELECT 1 FROM payments WHERE order_id = ? AND payment_status = 'Pendiente (Mercado Pago)' LIMIT 1")
+        .get(id);
+      const stockWasDeducted = !mpPending && order.order_status !== 'Pagado / Revisión de Stock';
+
       db.prepare("UPDATE orders SET order_status = 'Cancelado' WHERE id = ?").run(id);
       db.prepare("UPDATE payments SET payment_status = 'Rechazado' WHERE order_id = ?").run(id);
 
       const items = db.prepare('SELECT product_id, quantity FROM order_items WHERE order_id = ?').all(id);
       const restoreStock = db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?');
-      for (const item of items) {
+      for (const item of stockWasDeducted ? items : []) {
         if (item.product_id) {
           restoreStock.run(item.quantity, item.product_id);
         }

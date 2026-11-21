@@ -10,11 +10,15 @@ import {
   Check,
   Store,
   SlidersHorizontal,
+  LogIn,
+  UserPlus,
+  LogOut,
 } from 'lucide-react';
 import { useCart } from '../context/CartContext.jsx';
 import { useUser } from '../context/UserContext.jsx';
 
 const CATEGORIES = ['Todos', 'Proteínas', 'Creatinas', 'Pre-Entrenos', 'Accesorios'];
+const IS_STORE_ONLY = import.meta.env?.VITE_STORE_ONLY === 'true';
 
 export default function Header({
   activeTab,
@@ -26,9 +30,10 @@ export default function Header({
   sortBy,
   setSortBy,
   pendingVerificationCount = 0,
+  onOpenAuth,
 }) {
   const { totalItems, openCart } = useCart();
-  const { currentUser } = useUser();
+  const { currentUser, logout } = useUser();
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [copiedField, setCopiedField] = useState('');
 
@@ -47,7 +52,7 @@ export default function Header({
           <span className="hidden sm:inline">•</span>
           <span className="hidden sm:inline">¡Envío GRATIS en compras desde S/ 150.00!</span>
           <span className="hidden md:inline">•</span>
-          <span className="hidden md:inline">Yape / Plin / Transferencia BCP</span>
+          <span className="hidden md:inline">Yape / Plin / Tarjeta / Transferencia</span>
         </div>
 
         {/* Main Navbar */}
@@ -110,25 +115,59 @@ export default function Header({
                 <span className="hidden sm:inline">Tienda</span>
               </button>
 
-              {/* Mi Perfil y Mis Pedidos */}
-              <button
-                onClick={() => setActiveTab('profile')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold transition-all duration-150 ${
-                  activeTab === 'profile'
-                    ? 'bg-orange-600 text-white shadow-md shadow-orange-600/30'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                }`}
-                title={currentUser ? `Conectado como: ${currentUser.name}` : 'Mi Perfil'}
-              >
-                <User className="w-4 h-4" />
-                <div className="text-left hidden lg:block">
-                  <span className="block leading-none text-xs text-slate-400">Mi Cuenta</span>
-                  <span className="block leading-tight text-xs font-bold text-slate-100 truncate max-w-[120px]">
-                    {currentUser?.name?.split(' ')[0] || 'Cliente'}
-                  </span>
+              {/* Autenticación / Cuenta del Cliente */}
+              {currentUser ? (
+                <>
+                  <button
+                    onClick={() => setActiveTab('profile')}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all duration-150 ${
+                      activeTab === 'profile'
+                        ? 'bg-orange-600 text-white shadow-md shadow-orange-600/30'
+                        : 'text-slate-300 hover:text-white hover:bg-slate-800'
+                    }`}
+                    title={`Conectado como: ${currentUser.name}`}
+                  >
+                    <User className="w-4 h-4" />
+                    <div className="text-left hidden lg:block">
+                      <span className="block leading-none text-[10px] text-slate-300">Mi Cuenta</span>
+                      <span className="block leading-tight text-xs font-bold text-white truncate max-w-[110px]">
+                        {currentUser.name?.split(' ')[0] || 'Cliente'}
+                      </span>
+                    </div>
+                    <span className="lg:hidden hidden sm:inline">Perfil</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      logout();
+                      if (activeTab === 'profile') setActiveTab('store');
+                    }}
+                    className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition-all border border-transparent hover:border-slate-700"
+                    title="Cerrar Sesión"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span className="hidden xl:inline">Salir</span>
+                  </button>
+                </>
+              ) : (
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <button
+                    onClick={() => onOpenAuth && onOpenAuth('login')}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-200 hover:text-white bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 transition-all"
+                  >
+                    <LogIn className="w-4 h-4 text-orange-400" />
+                    <span>Iniciar Sesión</span>
+                  </button>
+
+                  <button
+                    onClick={() => onOpenAuth && onOpenAuth('register')}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-orange-600 to-amber-500 hover:from-orange-500 hover:to-amber-400 shadow-md shadow-orange-600/25 transition-all"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>Crear Cuenta</span>
+                  </button>
                 </div>
-                <span className="lg:hidden hidden sm:inline">Perfil</span>
-              </button>
+              )}
 
               {/* Botón Carrito */}
               <button
@@ -144,24 +183,26 @@ export default function Header({
                 )}
               </button>
 
-              {/* Botón Acceso Panel Admin */}
-              <button
-                onClick={() => setActiveTab('admin')}
-                className={`relative flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all ${
-                  activeTab === 'admin'
-                    ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/30'
-                    : 'bg-slate-800/80 hover:bg-slate-800 text-amber-400 hover:text-amber-300 border border-amber-500/30 hover:border-amber-500/60'
-                }`}
-                title="Acceso al Panel de Administración"
-              >
-                <ShieldCheck className="w-4 h-4" />
-                <span className="hidden sm:inline">Panel Admin</span>
-                {pendingVerificationCount > 0 && (
-                  <span className="bg-rose-500 text-white text-[10px] font-black rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center animate-pulse shadow">
-                    {pendingVerificationCount}
-                  </span>
-                )}
-              </button>
+              {/* Botón Acceso Panel Admin (oculto en tienda pública de clientes) */}
+              {!IS_STORE_ONLY && (
+                <button
+                  onClick={() => setActiveTab('admin')}
+                  className={`relative flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+                    activeTab === 'admin'
+                      ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/30'
+                      : 'bg-slate-800/80 hover:bg-slate-800 text-amber-400 hover:text-amber-300 border border-amber-500/30 hover:border-amber-500/60'
+                  }`}
+                  title="Acceso al Panel de Administración"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span className="hidden sm:inline">Panel Admin</span>
+                  {pendingVerificationCount > 0 && (
+                    <span className="bg-rose-500 text-white text-[10px] font-black rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center animate-pulse shadow">
+                      {pendingVerificationCount}
+                    </span>
+                  )}
+                </button>
+              )}
             </div>
           </div>
 
@@ -232,7 +273,7 @@ export default function Header({
       </header>
 
       {/* Modal Acceso Rápido Administrador */}
-      {isAdminModalOpen && (
+      {!IS_STORE_ONLY && isAdminModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
           <div className="bg-slate-900 border border-amber-500/40 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
             <button
@@ -286,8 +327,8 @@ export default function Header({
               </div>
 
               <div className="border-t border-slate-800 pt-2 flex items-center justify-between text-xs">
-                <span className="text-slate-400 font-medium">Titular Recaudador:</span>
-                <span className="text-slate-200 font-semibold">Jeancarlos José Huertas</span>
+                <span className="text-slate-400 font-medium">Rol de Acceso:</span>
+                <span className="text-slate-200 font-semibold">Administrador FitStore Pro</span>
               </div>
             </div>
 

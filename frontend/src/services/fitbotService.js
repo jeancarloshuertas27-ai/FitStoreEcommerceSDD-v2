@@ -6,7 +6,7 @@ export const INITIAL_MESSAGES = [
   {
     id: 'welcome-1',
     sender: 'bot',
-    text: '¡Hola, atleta! 💪 Soy **FitBot**, tu coach y asesor deportivo de **FitStore Pro**.\n\nEstoy conectado en tiempo real al catálogo de suplementos, pedidos y cuentas de pago. ¿Cuál es tu objetivo físico hoy o en qué te puedo ayudar?',
+    text: '¡Hola, atleta! 💪 Soy **FitBot**, tu coach y asesor deportivo de **FitStore Pro**.\n\nEstoy conectado en tiempo real al catálogo de suplementos y pedidos. ¿Cuál es tu objetivo físico hoy o en qué te puedo ayudar?',
     timestamp: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
     type: 'welcome',
   },
@@ -16,7 +16,7 @@ export const QUICK_REPLIES = [
   { id: 'qr-muscle', label: '💪 Ganar masa muscular', query: 'ganar masa muscular' },
   { id: 'qr-energy', label: '⚡ Energía y Pre-entreno', query: 'energia preentreno' },
   { id: 'qr-order', label: '📦 Consultar estado de mi pedido', query: 'consultar estado de mi pedido' },
-  { id: 'qr-payment', label: '💳 ¿Cómo pagar con Yape / Plin / Cuenta?', query: 'como pagar yape plin' },
+  { id: 'qr-payment', label: '💳 ¿Cómo pagar en FitStore Pro?', query: 'como pagar yape plin' },
 ];
 
 /**
@@ -78,13 +78,32 @@ export function clearHistory() {
  * @returns {Promise<Object>} Objeto del mensaje de respuesta de FitBot.
  */
 export async function processUserMessage(userText, products = [], storeSettings = {}) {
+  // Si está desplegado en Cloudflare Workers (/api), consultar endpoint Workers AI + D1 primero
+  if (import.meta.env?.VITE_API_URL === '/api') {
+    try {
+      const remoteReply = await api.askFitBot({ message: userText });
+      if (remoteReply && remoteReply.text) {
+        return {
+          ...remoteReply,
+          id: remoteReply.id || `bot-${Date.now()}`,
+          sender: 'bot',
+          timestamp:
+            remoteReply.timestamp ||
+            new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
+        };
+      }
+    } catch (err) {
+      console.warn('FitBot Workers AI fallback local:', err?.message);
+    }
+  }
+
   const norm = normalizeText(userText);
   const now = new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
   const msgId = `bot-${Date.now()}`;
 
-  // Asegurar acceso al catálogo completo desde SQLite si no se recibieron o si están filtrados
+  // Asegurar acceso al catálogo completo si no se recibieron productos
   let catalog = Array.isArray(products) ? [...products] : [];
-  if (catalog.length < 8) {
+  if (catalog.length === 0) {
     try {
       const fullCatalog = await api.getProducts();
       if (Array.isArray(fullCatalog) && fullCatalog.length > 0) {
@@ -92,19 +111,6 @@ export async function processUserMessage(userText, products = [], storeSettings 
       }
     } catch (e) {
       // Usar los productos en memoria
-    }
-  }
-
-  // Asegurar configuración del dueño actualizada
-  let activeSettings = storeSettings;
-  if (!activeSettings || !activeSettings.owner_name) {
-    try {
-      const fetchedSettings = await api.getSettings();
-      if (fetchedSettings && fetchedSettings.owner_name) {
-        activeSettings = fetchedSettings;
-      }
-    } catch (e) {
-      // Usar storeSettings o defaults
     }
   }
 
@@ -156,7 +162,7 @@ export async function processUserMessage(userText, products = [], storeSettings 
             order_status: ord.order_status || 'En Verificación',
             payment_status: ord.payment?.payment_status || 'Pendiente de Verificación',
             payment_method: ord.payment?.method || 'Yape',
-            destination_account: ord.payment?.destination_account || 'Cuenta del Propietario',
+            destination_account: 'Pasarela FitStore Pro',
             items_summary: itemsText,
           };
         });
@@ -173,7 +179,7 @@ export async function processUserMessage(userText, products = [], storeSettings 
         return {
           id: msgId,
           sender: 'bot',
-          text: `No encontré ningún pedido registrado con el DNI o código **"${userText.trim()}"** en nuestra base de datos.\n\nPor favor verifica que tu número de DNI tenga 8 dígitos o consulta directamente con el soporte oficial vía WhatsApp al **+51 ${activeSettings?.whatsapp_notification || '983064501'}**.`,
+          text: `No encontré ningún pedido registrado con el DNI o código **"${userText.trim()}"** en nuestra base de datos.\n\nPor favor verifica que tu número de DNI tenga 8 dígitos o que el código de orden sea correcto (ej. ORD-2026-001).`,
           timestamp: now,
           type: 'text',
         };
@@ -230,29 +236,12 @@ export async function processUserMessage(userText, products = [], storeSettings 
     norm.includes('datos de pago');
 
   if (isAskingPayment) {
-    const ownerName = activeSettings?.owner_name || 'Jeancarlos José Huertas Quichca';
-    const yapeNum = activeSettings?.yape_number || '924046690';
-    const plinNum = activeSettings?.plin_number || '983064501';
-    const bankName = activeSettings?.bank_name || 'BCP - Banco de Crédito del Perú';
-    const bankAcc = activeSettings?.bank_account_soles || '22079349234041';
-    const bankCci = activeSettings?.bank_cci || '00222017934923404128';
-    const whatsapp = activeSettings?.whatsapp_notification || '983064501';
-
     return {
       id: msgId,
       sender: 'bot',
-      text: `En **FitStore Pro** todos los cobros se dirigen directamente a las cuentas oficiales del dueño sin intermediarios. Aquí tienes los datos actualizados:`,
+      text: `En **FitStore Pro** todos tus pagos se procesan de forma segura mediante nuestra pasarela integrada directamente en el Checkout:\n\n• **Yape / Plin**: Ingresa tu número celular (9 dígitos) y el código OTP de aprobación de 6 dígitos generado en tu app.\n• **Transferencia con Código CIP**: Genera tu código CIP de 24h para abonar desde tu banca móvil.\n• **Tarjeta de Crédito o Débito**: Pago instantáneo cifrado con validación 3D Secure.`,
       timestamp: now,
-      type: 'payment_info',
-      paymentData: {
-        owner_name: ownerName,
-        yape_number: yapeNum,
-        plin_number: plinNum,
-        bank_name: bankName,
-        bank_account_soles: bankAcc,
-        bank_cci: bankCci,
-        whatsapp_notification: whatsapp,
-      },
+      type: 'text',
     };
   }
 
@@ -408,7 +397,7 @@ export async function processUserMessage(userText, products = [], storeSettings 
   return {
     id: msgId,
     sender: 'bot',
-    text: `Como tu coach fitness puedo ayudarte a:\n\n1. Recomendarte **Proteínas, Creatinas o Pre-Entrenos** según tus metas físicas.\n2. Consultar opciones económicas o suplementos en oferta.\n3. Indicarte los datos de cobro oficiales para transferir por **Yape, Plin o BCP**.\n4. Rastrear en vivo tu pedido con tu **DNI de 8 dígitos** o código de orden.\n\n¿Por cuál te gustaría empezar? Puedes usar los botones de acceso rápido aquí abajo:`,
+    text: `Como tu coach fitness puedo ayudarte a:\n\n1. Recomendarte **Proteínas, Creatinas o Pre-Entrenos** según tus metas físicas.\n2. Consultar opciones económicas o suplementos en oferta.\n3. Explicarte cómo pagar de forma segura por **Yape/Plin (OTP), Código CIP o Tarjeta**.\n4. Rastrear en vivo tu pedido con tu **DNI de 8 dígitos** o código de orden.\n\n¿Por cuál te gustaría empezar? Puedes usar los botones de acceso rápido aquí abajo:`,
     timestamp: now,
     type: 'welcome',
   };

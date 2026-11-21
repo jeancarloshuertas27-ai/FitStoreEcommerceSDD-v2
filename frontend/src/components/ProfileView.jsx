@@ -7,21 +7,20 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertCircle,
-  Building2,
-  Phone,
   CreditCard,
   Calendar,
   Clock,
-  Check,
-  X,
   Eye,
+  LogIn,
+  LogOut,
+  ShieldCheck,
 } from 'lucide-react';
 import { useUser } from '../context/UserContext.jsx';
 import api from '../services/api.js';
 import ElectronicReceipt from './ElectronicReceipt.jsx';
 
-export default function ProfileView() {
-  const { users, currentUser, switchUser, updateCurrentUser, registerUser } = useUser();
+export default function ProfileView({ onOpenAuth }) {
+  const { currentUser, logout, updateCurrentUser } = useUser();
 
   const [activeSubTab, setActiveSubTab] = useState('data'); // 'data' | 'orders'
   const [formData, setFormData] = useState({
@@ -36,24 +35,7 @@ export default function ProfileView() {
   const [orders, setOrders] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [saveStatus, setSaveStatus] = useState({ type: '', message: '' });
-  const [isNewUserModalOpen, setIsNewUserModalOpen] = useState(false);
-  const [newUserData, setNewUserData] = useState({
-    name: '',
-    dni: '',
-    email: '',
-    phone: '',
-    address: '',
-    city: 'Lima',
-  });
-  const [registerStatus, setRegisterStatus] = useState({ type: '', message: '' });
   const [selectedReceiptOrder, setSelectedReceiptOrder] = useState(null);
-  const [storeSettings, setStoreSettings] = useState(null);
-
-  useEffect(() => {
-    api.getSettings()
-      .then((data) => setStoreSettings(data))
-      .catch((err) => console.error('Error cargando store_settings en ProfileView:', err));
-  }, []);
 
   // Sincronizar datos del formulario con el usuario actual
   useEffect(() => {
@@ -67,6 +49,8 @@ export default function ProfileView() {
         city: currentUser.city || '',
       });
       loadUserOrders(currentUser.id);
+    } else {
+      setOrders([]);
     }
   }, [currentUser]);
 
@@ -104,34 +88,10 @@ export default function ProfileView() {
 
     try {
       await updateCurrentUser(formData);
-      setSaveStatus({ type: 'success', message: '¡Datos personales actualizados correctamente en SQLite!' });
+      setSaveStatus({ type: 'success', message: '¡Datos personales actualizados correctamente!' });
       setTimeout(() => setSaveStatus({ type: '', message: '' }), 3000);
     } catch (err) {
       setSaveStatus({ type: 'error', message: err.message || 'Error al guardar cambios' });
-    }
-  };
-
-  const handleRegisterNewUser = async (e) => {
-    e.preventDefault();
-    setRegisterStatus({ type: '', message: '' });
-
-    if (!/^\d{8}$/.test(newUserData.dni)) {
-      setRegisterStatus({ type: 'error', message: 'El DNI debe tener 8 dígitos numéricos.' });
-      return;
-    }
-    if (!/^\d{9}$/.test(newUserData.phone)) {
-      setRegisterStatus({ type: 'error', message: 'El celular debe tener 9 dígitos numéricos.' });
-      return;
-    }
-
-    try {
-      await registerUser(newUserData);
-      setIsNewUserModalOpen(false);
-      setNewUserData({ name: '', dni: '', email: '', phone: '', address: '', city: 'Lima' });
-      setSaveStatus({ type: 'success', message: '¡Nuevo cliente registrado y seleccionado con éxito!' });
-      setTimeout(() => setSaveStatus({ type: '', message: '' }), 3000);
-    } catch (err) {
-      setRegisterStatus({ type: 'error', message: err.message || 'Error al registrar cliente' });
     }
   };
 
@@ -153,45 +113,75 @@ export default function ProfileView() {
     }
   };
 
+  if (!currentUser) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16 animate-fadeIn">
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 sm:p-10 text-center space-y-5 shadow-2xl">
+          <div className="w-16 h-16 rounded-2xl bg-orange-500/15 border border-orange-500/30 text-orange-400 flex items-center justify-center mx-auto">
+            <User className="w-8 h-8" />
+          </div>
+          <div className="space-y-2">
+            <h1 className="text-2xl font-black text-white">Inicia sesión para ver tu perfil</h1>
+            <p className="text-sm text-slate-400 max-w-md mx-auto">
+              Accede a tus datos de despacho, historial de compras y boletas electrónicas en FitStore Pro.
+            </p>
+          </div>
+          <div className="flex flex-wrap justify-center gap-3 pt-2">
+            <button
+              onClick={() => onOpenAuth && onOpenAuth('login')}
+              className="flex items-center gap-2 px-5 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm font-bold text-white transition-all"
+            >
+              <LogIn className="w-4 h-4 text-orange-400" />
+              <span>Iniciar Sesión</span>
+            </button>
+            <button
+              onClick={() => onOpenAuth && onOpenAuth('register')}
+              className="flex items-center gap-2 px-5 py-3 rounded-xl bg-gradient-to-r from-orange-600 to-amber-500 hover:from-orange-500 hover:to-amber-400 text-sm font-bold text-white shadow-lg shadow-orange-600/25 transition-all"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Crear Cuenta</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-fadeIn">
-      {/* Top Header & Demo Customer Switcher */}
+      {/* Top Header & Customer Account Info */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 mb-8 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <span className="text-orange-500 text-xs font-bold uppercase tracking-wider">
-            Gestión del Cliente
+            Cuenta del Cliente
           </span>
           <h1 className="text-2xl font-black text-white mt-0.5">
             Mi Perfil y Mis Pedidos
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Datos personales de entrega e historial completo de compras con cuentas receptoras del propietario.
+            Datos personales de entrega e historial completo de compras y boletas electrónicas.
           </p>
         </div>
 
-        {/* Demo Customer Quick Switcher */}
-        <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-wrap items-center gap-3">
-          <div className="text-xs text-slate-400 font-medium">Cliente Activo:</div>
-          <select
-            value={currentUser?.id || ''}
-            onChange={(e) => switchUser(e.target.value)}
-            className="bg-slate-800 text-white text-xs font-bold rounded-lg px-3 py-1.5 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer"
-          >
-            {users
-              .filter((u) => u.role === 'client')
-              .map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name} (DNI: {u.dni})
-                </option>
-              ))}
-          </select>
+        <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-full bg-orange-600/20 border border-orange-500/30 text-orange-400 flex items-center justify-center font-black text-sm">
+              {(currentUser.name || 'C').charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <span className="block text-xs font-bold text-white">{currentUser.name}</span>
+              <span className="block text-[11px] text-slate-400">
+                DNI: {currentUser.dni} • {currentUser.email}
+              </span>
+            </div>
+          </div>
 
           <button
-            onClick={() => setIsNewUserModalOpen(true)}
-            className="flex items-center gap-1.5 bg-orange-600/20 hover:bg-orange-600 text-orange-400 hover:text-white border border-orange-500/30 text-xs font-bold px-3 py-1.5 rounded-lg transition-all"
+            onClick={logout}
+            className="flex items-center gap-1.5 bg-slate-800 hover:bg-rose-500/15 text-slate-300 hover:text-rose-400 border border-slate-700 hover:border-rose-500/30 text-xs font-bold px-3 py-2 rounded-lg transition-all"
           >
-            <UserPlus className="w-3.5 h-3.5" />
-            <span>Nuevo Cliente</span>
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Cerrar Sesión</span>
           </button>
         </div>
       </div>
@@ -429,13 +419,13 @@ export default function ProfileView() {
                   </div>
                 </div>
 
-                {/* Payment and Destination Account info */}
+                {/* Payment & Authorization info */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-slate-950/40 p-3 rounded-xl border border-slate-800/60 text-xs">
                   <div>
                     <span className="text-slate-400 block mb-0.5 font-medium">Método de Pago:</span>
                     <span className="font-bold text-white flex items-center gap-1.5">
                       <CreditCard className="w-3.5 h-3.5 text-orange-400" />
-                      {order.payment?.method || 'Pago Directo'}
+                      {order.payment?.method || 'Pasarela FitStore Pro'}
                     </span>
                     {order.payment?.operation_number && (
                       <span className="text-[11px] text-slate-400 font-mono block mt-0.5">
@@ -445,9 +435,11 @@ export default function ProfileView() {
                   </div>
 
                   <div>
-                    <span className="text-slate-400 block mb-0.5 font-medium">Cuenta Destino Recaudadora:</span>
-                    <span className="font-semibold text-slate-200 break-words text-[11px]">
-                      {order.payment?.destination_account || 'Cuenta de Jeancarlos José Huertas Quichca'}
+                    <span className="text-slate-400 block mb-0.5 font-medium">Validación de Pasarela:</span>
+                    <span className="font-semibold text-emerald-300 flex items-center gap-1.5 text-[11px]">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      {order.payment?.payment_status || 'Procesado'}
+                      {order.payment?.auth_code ? ` • ${order.payment.auth_code}` : ''}
                     </span>
                   </div>
                 </div>
@@ -481,119 +473,10 @@ export default function ProfileView() {
         </div>
       )}
 
-      {/* Modal Registrar Nuevo Cliente */}
-      {isNewUserModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
-            <button
-              onClick={() => setIsNewUserModalOpen(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-2 mb-4">
-              <div className="w-8 h-8 rounded-lg bg-orange-600/20 text-orange-400 flex items-center justify-center">
-                <UserPlus className="w-4 h-4" />
-              </div>
-              <h3 className="text-lg font-bold text-white">Registrar Nuevo Cliente</h3>
-            </div>
-
-            {registerStatus.message && (
-              <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 mb-4 font-semibold">
-                {registerStatus.message}
-              </div>
-            )}
-
-            <form onSubmit={handleRegisterNewUser} className="space-y-3.5 text-xs">
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Nombre Completo</label>
-                <input
-                  type="text"
-                  required
-                  value={newUserData.name}
-                  onChange={(e) => setNewUserData({ ...newUserData, name: e.target.value })}
-                  placeholder="Ej. Sofía Benavides"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">DNI (8 dígitos)</label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={8}
-                    value={newUserData.dni}
-                    onChange={(e) => setNewUserData({ ...newUserData, dni: e.target.value })}
-                    placeholder="8 dígitos"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Celular (9 dígitos)</label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={9}
-                    value={newUserData.phone}
-                    onChange={(e) => setNewUserData({ ...newUserData, phone: e.target.value })}
-                    placeholder="9 dígitos"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Correo Electrónico</label>
-                <input
-                  type="email"
-                  required
-                  value={newUserData.email}
-                  onChange={(e) => setNewUserData({ ...newUserData, email: e.target.value })}
-                  placeholder="ejemplo@correo.pe"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Dirección de Entrega</label>
-                <input
-                  type="text"
-                  required
-                  value={newUserData.address}
-                  onChange={(e) => setNewUserData({ ...newUserData, address: e.target.value })}
-                  placeholder="Calle / Av y número"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                />
-              </div>
-
-              <div className="pt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsNewUserModalOpen(false)}
-                  className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl font-semibold"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-bold shadow-md shadow-orange-600/30"
-                >
-                  Registrar en SQLite
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
       {/* Modal Boleta Electrónica */}
       {selectedReceiptOrder && (
         <ElectronicReceipt
           order={selectedReceiptOrder}
-          storeSettings={storeSettings}
           onClose={() => setSelectedReceiptOrder(null)}
           onOrderUpdated={(updatedOrder) => {
             setSelectedReceiptOrder(updatedOrder);
