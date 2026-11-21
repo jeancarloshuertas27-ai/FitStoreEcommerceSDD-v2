@@ -35,6 +35,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import api from '../services/api.js';
+import ShippingRatesTab from './ShippingRatesTab.jsx';
 
 const SAMPLE_FITNESS_IMAGES = [
   {
@@ -638,16 +639,18 @@ export default function AdminPanel({
     return o.order_status === orderStatusFilter;
   });
 
-  const filteredUsers = users.filter((u) => {
-    if (!userSearch.trim()) return true;
-    const s = userSearch.toLowerCase();
-    return (
-      u.name.toLowerCase().includes(s) ||
-      u.dni.includes(s) ||
-      u.email.toLowerCase().includes(s) ||
-      (u.phone && u.phone.includes(s))
-    );
-  });
+  const filteredUsers = users
+    .filter((u) => u.role === 'client')
+    .filter((u) => {
+      if (!userSearch.trim()) return true;
+      const s = userSearch.toLowerCase();
+      return (
+        u.name.toLowerCase().includes(s) ||
+        u.dni.includes(s) ||
+        u.email.toLowerCase().includes(s) ||
+        (u.phone && u.phone.includes(s))
+      );
+    });
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -775,6 +778,18 @@ export default function AdminPanel({
           >
             <Building2 className="w-4 h-4 text-amber-400" />
             <span>4. Configurar Mis Cuentas Receptoras</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('shipping')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'shipping'
+                ? 'bg-orange-600 text-white shadow-md shadow-orange-600/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Truck className="w-4 h-4 text-sky-400" />
+            <span>5. Tarifas de Envío</span>
           </button>
         </div>
       </header>
@@ -1377,6 +1392,8 @@ export default function AdminPanel({
           </div>
         )}
 
+        {activeTab === 'shipping' && <ShippingRatesTab />}
+
         {/* ========================================================================= */}
         {/* PESTAÑA 4: CONFIGURAR MIS CUENTAS RECEPTORAS (store_settings) */}
         {/* ========================================================================= */}
@@ -1401,7 +1418,7 @@ export default function AdminPanel({
               <div className="bg-orange-500/10 border border-orange-500/30 rounded-2xl p-4 flex items-start gap-3">
                 <Sparkles className="w-5 h-5 text-orange-400 shrink-0 mt-0.5" />
                 <div className="text-xs text-slate-300 leading-relaxed">
-                  <strong className="text-white">Impacto en Caliente:</strong> Cualquier cambio guardado aquí actualizará <strong className="text-orange-300">de inmediato</strong> los datos de cobro que ven los clientes en el Checkout (códigos QR de Yape y Plin, números de cuenta BCP y CCI, y pie de página) sin reiniciar el servidor.
+                  <strong className="text-white">Uso Privado de Tesorería:</strong> Las cuentas configuradas aquí se utilizan de forma <strong className="text-orange-300">exclusiva para tu conciliación interna</strong> en la auditoría de pedidos. Nunca se muestran al público ni a los clientes en la tienda o el Checkout.
                 </div>
               </div>
 

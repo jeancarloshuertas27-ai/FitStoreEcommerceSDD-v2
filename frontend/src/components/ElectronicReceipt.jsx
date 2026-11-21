@@ -91,6 +91,7 @@ export default function ElectronicReceipt({
   if (!activeOrder) return null;
 
   const total = Number(activeOrder.total || 0).toFixed(2);
+  const shippingCost = Number(activeOrder.shipping_cost || 0);
   const items = activeOrder.items || [];
   const payment = activePayment;
   const isCardApproved = payment.payment_status === 'Aprobado';
@@ -98,40 +99,6 @@ export default function ElectronicReceipt({
   const isExpired =
     activeOrder.order_status === 'Expirado' || payment.payment_status === 'Expirado';
   const showSuccessBanner = isCardApproved || isAutoVerified;
-  const whatsappNumber = storeSettings?.whatsapp_notification || '983064501';
-  const ownerName = storeSettings?.owner_name || 'Jeancarlos José Huertas Quichca';
-
-  // Construir mensaje de WhatsApp codificado
-  const buildWhatsAppUrl = () => {
-    const itemsSummary = items
-      .map((it) => `• ${it.quantity}x ${it.product_name} (S/ ${Number(it.subtotal || it.unit_price * it.quantity).toFixed(2)})`)
-      .join('\n');
-
-    const opDetail = payment.auth_code
-      ? `Código de Autorización: ${payment.auth_code}`
-      : `N° de Operación: ${payment.operation_number || 'N/A'}`;
-
-    const text = `¡Hola FitStore Pro! 🏋️‍♂️ Acabo de realizar una compra en la tienda web:
-
-*Pedido:* ${activeOrder.order_code}
-*Cliente:* ${activeOrder.customer_name}
-*DNI:* ${activeOrder.customer_dni}
-*Celular:* ${activeOrder.customer_phone}
-*Dirección de Entrega:* ${activeOrder.shipping_address}
-
-*Detalle de Productos:*
-${itemsSummary}
-
-*Total Pagado:* S/ ${total}
-*Método de Pago:* ${payment.method || 'Yape'}
-*Cuenta Destino:* ${payment.destination_account || 'Cuenta del Titular'}
-*${opDetail}*
-*Estado:* ${activeOrder.order_status}
-
-Adjunto mi comprobante para la validación inmediata y despacho. ¡Muchas gracias!`;
-
-    return `https://wa.me/51${whatsappNumber}?text=${encodeURIComponent(text)}`;
-  };
 
   const handlePrint = () => {
     window.print();
@@ -212,12 +179,12 @@ Adjunto mi comprobante para la validación inmediata y despacho. ¡Muchas gracia
             {isExpired
               ? 'Transcurrieron más de 24 horas sin verificación; el stock fue liberado automáticamente.'
               : isAutoVerified
-              ? `Tu pago vía ${payment.method || 'canal digital'} fue conciliado en tiempo real hacia la cuenta de ${ownerName}.`
+              ? `Tu pago vía ${payment.method || 'pasarela digital'} fue verificado en tiempo real por FitStore Pro.`
               : showSuccessBanner
-              ? 'Tu pago fue autorizado y liquidado en la cuenta recaudadora del negocio.'
+              ? 'Tu pago fue autorizado correctamente en FitStore Pro.'
               : isPendingCip
               ? `Tienes ${formatCipCountdown(cipSecondsLeft)} para completar y verificar tu abono con el código ${payment.auth_code}.`
-              : 'Hemos recibido tu orden y comprobante. En breve nuestro equipo validará el voucher para el despacho.'}
+              : 'Hemos recibido tu orden. En breve nuestro equipo validará tu comprobante para el despacho.'}
           </p>
         </div>
 
@@ -311,11 +278,18 @@ Adjunto mi comprobante para la validación inmediata y despacho. ¡Muchas gracia
           <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-1.5 text-xs">
             <div className="flex justify-between text-slate-400">
               <span>Subtotal Productos:</span>
-              <span className="font-mono text-slate-300">S/ {total}</span>
+              <span className="font-mono text-slate-300">S/ {(Number(total) - shippingCost).toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-slate-400">
-              <span>Costo de Envío:</span>
-              <span className="font-mono text-emerald-400 font-bold">¡Envío Gratis!</span>
+              <span>
+                Costo de Envío
+                {activeOrder.shipping_province ? ` (${activeOrder.shipping_province})` : ''}:
+              </span>
+              {shippingCost > 0 ? (
+                <span className="font-mono text-slate-300 font-bold">S/ {shippingCost.toFixed(2)}</span>
+              ) : (
+                <span className="font-mono text-emerald-400 font-bold">¡Envío Gratis!</span>
+              )}
             </div>
             <div className="border-t border-slate-800 pt-2 flex justify-between items-center text-sm">
               <span className="font-bold text-white">Total Liquidado en Soles:</span>
@@ -325,12 +299,12 @@ Adjunto mi comprobante para la validación inmediata y despacho. ¡Muchas gracia
             </div>
           </div>
 
-          {/* Información de Pago y Cuenta Receptora del Titular */}
+          {/* Información de Pago Autorizado */}
           <div className="p-4 rounded-2xl bg-orange-950/20 border border-orange-500/30 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-orange-400 font-bold text-xs uppercase tracking-wide">
                 <ShieldCheck className="w-4 h-4" />
-                Canal de Cobro Directo al Titular
+                Resumen de Pago Autorizado
               </div>
               {isAutoVerified && (
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold">
@@ -362,9 +336,9 @@ Adjunto mi comprobante para la validación inmediata y despacho. ¡Muchas gracia
                 </div>
               )}
               <div className="sm:col-span-2">
-                <span className="text-slate-400 text-[11px] block">Cuenta / Destino Oficial del Dueño:</span>
-                <strong className="text-orange-300 font-mono text-xs">
-                  {payment.destination_account || `Yape: ${storeSettings?.yape_number || '924046690'} (${ownerName})`}
+                <span className="text-slate-400 text-[11px] block">Estado de Verificación:</span>
+                <strong className="text-emerald-300 font-mono text-xs">
+                  {payment.payment_status || 'Procesado'} • Pasarela FitStore Pro
                 </strong>
               </div>
             </div>
@@ -465,7 +439,7 @@ Adjunto mi comprobante para la validación inmediata y despacho. ¡Muchas gracia
                   />
                   <div>
                     <span className="text-xs font-bold text-slate-200 block">Comprobante de Pago Adjunto</span>
-                    <span className="text-[10px] text-slate-400">Registrado en la base de datos SQLite</span>
+                    <span className="text-[10px] text-slate-400">Adjuntado al comprobante de compra</span>
                   </div>
                 </div>
                 <a
@@ -481,19 +455,8 @@ Adjunto mi comprobante para la validación inmediata y despacho. ¡Muchas gracia
             )}
           </div>
 
-          {/* Botón WhatsApp Destacado */}
+          {/* Acciones de la Boleta */}
           <div className="space-y-3">
-            <a
-              href={buildWhatsAppUrl()}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-black text-sm flex items-center justify-center gap-3 shadow-xl shadow-emerald-600/30 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
-            >
-              <MessageCircle className="w-5 h-5 fill-current" />
-              <span>Notificar compra y enviar voucher a mi WhatsApp</span>
-              <ExternalLink className="w-4 h-4 opacity-80" />
-            </a>
-
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button
                 onClick={handlePrint}
@@ -527,7 +490,6 @@ Adjunto mi comprobante para la validación inmediata y despacho. ¡Muchas gracia
       <AutoVerifyModal
         isOpen={cipVerifyOpen}
         method="bank_transfer"
-        ownerName={ownerName}
         verifyFn={() =>
           api.autoVerifyPayment({
             method: 'bank_transfer',

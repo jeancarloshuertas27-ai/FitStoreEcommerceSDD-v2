@@ -8,7 +8,7 @@ export function generateDemoVoucher({
   method = 'Yape',
   amount = 0,
   operationNumber = '',
-  ownerName = 'Jeancarlos José Huertas Quichca',
+  ownerName = 'FitStore Pro',
   destination = '',
   date = new Date()
 }) {
@@ -94,7 +94,7 @@ function renderYapeVoucher(ctx, { width, height, formattedAmount, operationNumbe
   ctx.textAlign = 'left';
 
   drawField(ctx, 'Destinatario:', ownerName, 48, 195, 215);
-  drawField(ctx, 'Número de Yape:', destination || '924046690', 48, 245, 265);
+  drawField(ctx, 'Canal de Pago:', destination || 'Pasarela Yape FitStore Pro', 48, 245, 265);
   drawField(ctx, 'Fecha y hora:', `${formattedDate} • ${formattedTime}`, 48, 295, 315);
   drawField(ctx, 'N° de Operación:', operationNumber || 'OP-849120', 48, 345, 365, '#00D4B2');
 
@@ -159,8 +159,8 @@ function renderPlinVoucher(ctx, { width, height, formattedAmount, operationNumbe
 
   // Datos
   ctx.textAlign = 'left';
-  drawField(ctx, 'Titular Receptor:', ownerName, 48, 195, 215);
-  drawField(ctx, 'Celular Plin:', destination || '983064501', 48, 245, 265);
+  drawField(ctx, 'Comercio:', ownerName, 48, 195, 215);
+  drawField(ctx, 'Canal de Pago:', destination || 'Pasarela Plin FitStore Pro', 48, 245, 265);
   drawField(ctx, 'Fecha y hora:', `${formattedDate} • ${formattedTime}`, 48, 295, 315);
   drawField(ctx, 'N° de Operación:', operationNumber || 'PLIN-492015', 48, 345, 365, '#FF6B00');
 
@@ -225,8 +225,8 @@ function renderBcpVoucher(ctx, { width, height, formattedAmount, operationNumber
 
   // Campos
   ctx.textAlign = 'left';
-  drawField(ctx, 'Beneficiario:', ownerName, 48, 195, 215);
-  drawField(ctx, 'Cuenta Destino BCP:', destination || '22079349234041', 48, 245, 265);
+  drawField(ctx, 'Comercio:', ownerName, 48, 195, 215);
+  drawField(ctx, 'Código Referencia:', destination || 'CIP-FITSTORE', 48, 245, 265);
   drawField(ctx, 'Fecha y hora:', `${formattedDate} • ${formattedTime}`, 48, 295, 315);
   drawField(ctx, 'N° de Operación:', operationNumber || 'BCP-938201', 48, 345, 365, '#FF7800');
 

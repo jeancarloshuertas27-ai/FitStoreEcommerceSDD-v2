@@ -1,7 +1,7 @@
 import db from './database.js';
 
 export function initializeDatabase() {
-  // 1. Crear 6 tablas relacionales
+  // 1. Crear 6 tablas relacionales e índices de verificación
   db.exec(`
     CREATE TABLE IF NOT EXISTS store_settings (
       id INTEGER PRIMARY KEY DEFAULT 1,
@@ -84,20 +84,64 @@ export function initializeDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_payments_operation_number ON payments(operation_number);
     CREATE INDEX IF NOT EXISTS idx_payments_auth_code ON payments(auth_code);
+
+    CREATE TABLE IF NOT EXISTS shipping_rates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      department TEXT NOT NULL,
+      province TEXT NOT NULL,
+      cost REAL NOT NULL,
+      delivery_days TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_shipping_rates_active ON shipping_rates(active);
   `);
 
-  // 2. Verificar si store_settings está sembrada
+  // 1.b Migración liviana: columnas de envío en orders (feature 007)
+  const orderCols = db.prepare('PRAGMA table_info(orders)').all().map((c) => c.name);
+  if (!orderCols.includes('shipping_cost')) {
+    db.exec('ALTER TABLE orders ADD COLUMN shipping_cost REAL NOT NULL DEFAULT 0');
+  }
+  if (!orderCols.includes('shipping_department')) {
+    db.exec("ALTER TABLE orders ADD COLUMN shipping_department TEXT NOT NULL DEFAULT ''");
+  }
+  if (!orderCols.includes('shipping_province')) {
+    db.exec("ALTER TABLE orders ADD COLUMN shipping_province TEXT NOT NULL DEFAULT ''");
+  }
+
+  // 1.c Un mismo número de operación aprobado no puede registrarse dos veces
+  try {
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_operation_approved
+      ON payments(operation_number)
+      WHERE operation_number IS NOT NULL AND payment_status = 'Aprobado'
+    `);
+  } catch (err) {
+    console.warn('[DB] No se pudo crear índice único de operaciones (datos duplicados previos):', err.message);
+  }
+
+  // 1.d Tarifas de envío iniciales
+  const ratesCount = db.prepare('SELECT COUNT(*) as count FROM shipping_rates').get();
+  if (ratesCount.count === 0) {
+    const insertRate = db.prepare(
+      'INSERT INTO shipping_rates (department, province, cost, delivery_days, active) VALUES (?, ?, ?, ?, 1)'
+    );
+    insertRate.run('Ayacucho', 'Huamanga', 8.0, '1 a 2 días hábiles');
+    insertRate.run('Lima', 'Lima Metropolitana', 12.0, '2 a 3 días hábiles');
+    insertRate.run('Nacional', 'Otras Provincias (Perú)', 18.0, '3 a 5 días hábiles');
+  }
+
+  // 2. Asegurar configuración base del administrador si no existe
   const settingsRow = db.prepare('SELECT COUNT(*) as count FROM store_settings').get();
   if (settingsRow.count === 0) {
-    console.log('[Auto-Seed] Sembrando datos iniciales en database.sqlite...');
+    console.log('[Auto-Seed] Inicializando configuración base y cuenta única de Administrador...');
 
-    // Sembrar Configuración del Propietario
-    const insertSettings = db.prepare(`
+    db.prepare(`
       INSERT INTO store_settings (
         id, owner_name, yape_number, plin_number, bank_name, bank_account_soles, bank_cci, whatsapp_notification
       ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    insertSettings.run(
+    `).run(
       'Jeancarlos José Huertas Quichca',
       '924046690',
       '983064501',
@@ -106,188 +150,26 @@ export function initializeDatabase() {
       '00222017934923404128',
       '983064501'
     );
+  }
 
-    // Sembrar Usuarios (1 Admin, 2 Clientes demo)
-    const insertUser = db.prepare(`
+  // 3. Asegurar que exista la cuenta única de Administrador si la tabla users está vacía
+  const adminExists = db
+    .prepare("SELECT id FROM users WHERE email = 'admin@fitstore.pe' LIMIT 1")
+    .get();
+
+  if (!adminExists) {
+    db.prepare(`
       INSERT INTO users (name, dni, email, phone, address, city, password, role)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    insertUser.run(
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'admin')
+    `).run(
       'Administrador FitStore',
       '00000000',
       'admin@fitstore.pe',
       '983064501',
       'Oficina Central FitStore',
       'Lima',
-      'admin123',
-      'admin'
+      'admin123'
     );
-    insertUser.run(
-      'Carlos Mendoza Ríos',
-      '72458912',
-      'carlos.mendoza@gmail.com',
-      '987654321',
-      'Av. Arequipa 2450, Dpto 402',
-      'Lima',
-      'cliente123',
-      'client'
-    );
-    insertUser.run(
-      'Valeria Gómez Paredes',
-      '45891234',
-      'valeria.gomez@hotmail.com',
-      '912345678',
-      'Calle Los Pinos 180, Miraflores',
-      'Lima',
-      'cliente123',
-      'client'
-    );
-
-    // Sembrar 8 Productos Fitness
-    const insertProduct = db.prepare(`
-      INSERT INTO products (name, description, category, price, stock, image_url, featured)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const productsData = [
-      [
-        'Gold Standard 100% Whey 2lb (Optimum Nutrition)',
-        'Proteína aislada de suero de leche de absorción ultra rápida con 24g de proteína pura por servicio.',
-        'Proteínas',
-        189.90,
-        25,
-        'https://images.unsplash.com/photo-1579722821273-0f6c7d44362f?auto=format&fit=crop&w=800&q=80',
-        1
-      ],
-      [
-        'ISO 100 Hydrolyzed 5lb (Dymatize)',
-        'Proteína hidrolizada premium de rápida digestión con 25g de proteína y cero azúcar.',
-        'Proteínas',
-        249.00,
-        18,
-        'https://images.unsplash.com/photo-1593095948071-474c5cc2989d?auto=format&fit=crop&w=800&q=80',
-        1
-      ],
-      [
-        'Creatina Monohidratada Creapure 300g (Universal)',
-        'Creatina Creapure 100% micronizada de máxima pureza para potencia y ganancia de masa muscular.',
-        'Creatinas',
-        115.00,
-        40,
-        'https://images.unsplash.com/photo-1546483875-ad9014c88eba?auto=format&fit=crop&w=800&q=80',
-        1
-      ],
-      [
-        'Creatine Micronized 5000mg (Optimum Nutrition)',
-        'Suplemento de creatina monohidratada de alta absorción sin sabor para mejorar el rendimiento atlético.',
-        'Creatinas',
-        135.00,
-        32,
-        'https://images.unsplash.com/photo-1584017911766-d451b3d0e843?auto=format&fit=crop&w=800&q=80',
-        0
-      ],
-      [
-        'C4 Original Pre-Workout 30 serv (Cellucor)',
-        'Energía explosiva, enfoque mental láser y bombeo muscular intenso para tus sesiones más pesadas.',
-        'Pre-Entrenos',
-        129.00,
-        22,
-        'https://images.unsplash.com/photo-1541534741688-6078c6bfb5c5?auto=format&fit=crop&w=800&q=80',
-        1
-      ],
-      [
-        'The Curse! Advanced Pre-Workout (JNX Sports)',
-        'Fórmula de pre-entrenamiento de alta potencia para resistencia y fuerza extrema sin bajones.',
-        'Pre-Entrenos',
-        119.00,
-        20,
-        'https://images.unsplash.com/photo-1517838277536-f5f99be501cd?auto=format&fit=crop&w=800&q=80',
-        0
-      ],
-      [
-        'Shaker Pro BlenderBottle Pro45 (45oz)',
-        'Botella mezcladora extra grande con batidor de acero quirúrgico libre de BPA y cierre hermético.',
-        'Accesorios',
-        45.00,
-        50,
-        'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=800&q=80',
-        0
-      ],
-      [
-        'Cinturón de Cuero para Levantamiento Pesado (Powerlifting)',
-        'Cinturón de cuero reforzado de 10mm con hebilla de acero inoxidable para soporte lumbar en sentadillas y peso muerto.',
-        'Accesorios',
-        95.00,
-        28,
-        'https://images.unsplash.com/photo-1517963879433-6ad2b056d712?auto=format&fit=crop&w=800&q=80',
-        1
-      ]
-    ];
-
-    for (const p of productsData) {
-      insertProduct.run(...p);
-    }
-
-    // Sembrar Pedidos de Demostración
-    const insertOrder = db.prepare(`
-      INSERT INTO orders (order_code, user_id, customer_name, customer_dni, customer_phone, shipping_address, total, order_status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const insertOrderItem = db.prepare(`
-      INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, subtotal)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    const insertPayment = db.prepare(`
-      INSERT INTO payments (order_id, method, destination_account, amount, currency, operation_number, payment_status)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    // Pedido 1: Carlos Mendoza
-    insertOrder.run(
-      'ORD-2026-001',
-      2,
-      'Carlos Mendoza Ríos',
-      '72458912',
-      '987654321',
-      'Av. Arequipa 2450, Dpto 402, Lima',
-      304.90,
-      'Pagado / En Preparación'
-    );
-    insertOrderItem.run(1, 1, 'Gold Standard 100% Whey 2lb (Optimum Nutrition)', 1, 189.90, 189.90);
-    insertOrderItem.run(1, 3, 'Creatina Monohidratada Creapure 300g (Universal)', 1, 115.00, 115.00);
-    insertPayment.run(
-      1,
-      'Yape',
-      'Yape titular: 924046690 (Jeancarlos José Huertas Quichca)',
-      304.90,
-      'PEN',
-      'OP-982145',
-      'Aprobado'
-    );
-
-    // Pedido 2: Valeria Gómez
-    insertOrder.run(
-      'ORD-2026-002',
-      3,
-      'Valeria Gómez Paredes',
-      '45891234',
-      '912345678',
-      'Calle Los Pinos 180, Miraflores, Lima',
-      129.00,
-      'En Verificación'
-    );
-    insertOrderItem.run(2, 5, 'C4 Original Pre-Workout 30 serv (Cellucor)', 1, 129.00, 129.00);
-    insertPayment.run(
-      2,
-      'Transferencia Bancaria',
-      'BCP Soles: 22079349234041 - CCI: 00222017934923404128 (Jeancarlos José Huertas Quichca)',
-      129.00,
-      'PEN',
-      'OP-441290',
-      'Pendiente de Verificación'
-    );
-
-    console.log('[Auto-Seed] Base de datos y datos semilla inicializados con éxito.');
+    console.log('[Auto-Seed] Cuenta de Administrador admin@fitstore.pe lista (0 productos y 0 clientes demo).');
   }
 }
-

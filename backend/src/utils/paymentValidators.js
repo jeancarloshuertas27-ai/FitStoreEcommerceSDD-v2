@@ -39,20 +39,38 @@ export function validateOTP(code) {
   if (!/^\d{6}$/.test(str)) {
     return false;
   }
-  if (/^(\d)\1{5}$/.test(str)) {
-    return false;
-  }
-  return true;
+  return !isTrivialOtp(str);
 }
 
 /**
- * Valida un número celular peruano de exactamente 9 dígitos numéricos.
+ * Detecta códigos OTP triviales o falsos de 6 dígitos:
+ *  - todos los dígitos iguales (000000, 111111, ...)
+ *  - secuencias consecutivas ascendentes o descendentes (123456, 654321, 012345, 543210)
+ *  - patrones repetidos de 2 o 3 dígitos (121212, 123123, 989898)
+ * @param {string|number} code
+ * @returns {boolean}
+ */
+export function isTrivialOtp(code) {
+  const str = String(code ?? '').trim();
+  if (/^(\d)\1{5}$/.test(str)) return true;
+  if (/^(\d{2})\1{2}$/.test(str)) return true;
+  if (/^(\d{3})\1$/.test(str)) return true;
+  const digits = str.split('').map(Number);
+  const steps = digits.slice(1).map((d, i) => d - digits[i]);
+  if (steps.length === 5 && (steps.every((s) => s === 1) || steps.every((s) => s === -1))) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Valida un número celular peruano: exactamente 9 dígitos numéricos que inician en 9.
  * @param {string|number} phone
  * @returns {boolean}
  */
 export function validatePhone(phone) {
   const str = String(phone ?? '').trim();
-  return /^\d{9}$/.test(str);
+  return /^9\d{8}$/.test(str);
 }
 
 /**

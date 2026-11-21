@@ -26,22 +26,21 @@ export default function AutoVerifyModal({
   onSuccessRef.current = onSuccess;
   onErrorRef.current = onError;
 
-  const displayOwner = ownerName || 'Jeancarlos José Huertas Quichca';
   const isCard = method === 'credit_card';
   const isBank = method === 'bank_transfer';
 
   const phases = isCard
     ? [
         '🔐 Procesando tokenización 3D Secure...',
-        '✅ Cobro autorizado. Liquidado a cuenta bancaria del titular.',
+        '✅ Cobro autorizado correctamente.',
       ]
     : [
         isBank
-          ? '🔄 Conectando con canal interbancario BCP/CCI...'
+          ? '🔄 Conectando con pasarela interbancaria CIP...'
           : '🔄 Conectando con cámara de compensación Yape / Plin...',
         isBank
-          ? `🔍 Verificando operación y abono interbancario en cuenta de ${displayOwner}...`
-          : `🔍 Verificando operación y abono en la cuenta de ${displayOwner}...`,
+          ? '🔍 Validando operación bancaria y conciliando pago...'
+          : '🔍 Validando número celular y código de aprobación OTP...',
         '✅ ¡Pago verificado automáticamente! Orden aprobada.',
       ];
 

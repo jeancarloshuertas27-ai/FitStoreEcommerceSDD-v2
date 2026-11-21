@@ -46,11 +46,13 @@ export const api = {
   updateProduct: (id, data) => request(`/products/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteProduct: (id) => request(`/products/${id}`, { method: 'DELETE' }),
 
-  // Usuarios y Clientes
+  // Usuarios y Autenticación de Clientes
   getUsers: () => request('/users'),
   getUserById: (id) => request(`/users/${id}`),
   updateUser: (id, data) => request(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   createUser: (data) => request('/users', { method: 'POST', body: JSON.stringify(data) }),
+  loginClient: (data) => request('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
+  registerClient: (data) => request('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
 
   // Pedidos e Historial
   getUserOrders: (userId) => request(`/orders/user/${userId}`),
@@ -66,6 +68,27 @@ export const api = {
   autoVerifyPayment: (data) => request('/payments/auto-verify', { method: 'POST', body: JSON.stringify(data) }),
   getPaymentAudit: (orderCode) => request(`/payments/audit/${orderCode}`),
   cancelOrder: (id) => request(`/orders/${id}/cancel`, { method: 'POST' }),
+
+  // Feature 007: Yape/Plin directo, Mercado Pago Checkout Pro y tarifas de envío
+  payYapePlin: (data) => request('/payments/yape-plin', { method: 'POST', body: JSON.stringify(data) }),
+  createPreference: (data) =>
+    request('/payments/create-preference', { method: 'POST', body: JSON.stringify(data) }),
+  createMercadoPagoPreference: (data) =>
+    request('/payments/create-preference', { method: 'POST', body: JSON.stringify(data) }),
+  verifyMercadoPago: (payload) => {
+    const body =
+      payload && typeof payload === 'object' ? payload : { payment_id: payload };
+    return request('/payments/verify-mercadopago', { method: 'POST', body: JSON.stringify(body) });
+  },
+  getShippingRates: () => request('/shipping-rates'),
+  getAdminShippingRates: () => request('/admin/shipping-rates'),
+  createShippingRate: (data) => request('/admin/shipping-rates', { method: 'POST', body: JSON.stringify(data) }),
+  updateShippingRate: (id, data) =>
+    request(`/admin/shipping-rates/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteShippingRate: (id) => request(`/admin/shipping-rates/${id}`, { method: 'DELETE' }),
+
+  // FitBot Asesor (Cloudflare Workers AI + D1)
+  askFitBot: (data) => request('/fitbot', { method: 'POST', body: JSON.stringify(data) }),
 };
 
 export default api;

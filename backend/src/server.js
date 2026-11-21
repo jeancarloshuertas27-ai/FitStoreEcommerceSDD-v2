@@ -1,11 +1,26 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
-import { initializeDatabase } from './db/seed.js';
+
+// Cargar variables de entorno locales (.env no versionado): MP_PUBLIC_KEY / MP_ACCESS_TOKEN
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+for (const envPath of [path.resolve(__dirname, '../.env'), path.resolve(__dirname, '../../.env')]) {
+  try {
+    process.loadEnvFile(envPath);
+  } catch {
+    // archivo opcional
+  }
+}
+
+const { initializeDatabase } = await import('./db/seed.js');
+const { default: shippingRatesRouter } = await import('./routes/shippingRates.js');
 import settingsRouter from './routes/settings.js';
 import productsRouter from './routes/products.js';
 import usersRouter from './routes/users.js';
 import ordersRouter from './routes/orders.js';
 import paymentsRouter from './routes/payments.js';
+import authRouter from './routes/auth.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -42,6 +57,8 @@ app.use('/api/products', productsRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/orders', ordersRouter);
 app.use('/api/payments', paymentsRouter);
+app.use('/api/auth', authRouter);
+app.use('/api', shippingRatesRouter);
 
 // 5. Manejador global de errores
 app.use((err, req, res, next) => {

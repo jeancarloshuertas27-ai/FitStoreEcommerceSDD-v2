@@ -395,59 +395,12 @@ export default function FitBotModal({ products = [], storeSettings = {} }) {
                       </div>
                     )}
 
-                    {/* RENDERIZADO: DATOS DE COBRO DEL PROPIETARIO (store_settings) */}
-                    {msg.type === 'payment_info' && msg.paymentData && (
-                      <div className="mt-3 space-y-2 pt-2 border-t border-slate-700/60 text-[11px]">
-                        <div className="bg-slate-900 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
-                          <div className="text-slate-300 font-semibold flex items-center justify-between">
-                            <span>Titular Recaudador:</span>
-                            <span className="text-orange-400 font-bold">{msg.paymentData.owner_name}</span>
-                          </div>
-
-                          <div className="flex items-center justify-between bg-slate-950 px-2 py-1.5 rounded-lg border border-slate-800">
-                            <span>Yape: <strong className="text-purple-400 font-mono">{msg.paymentData.yape_number}</strong></span>
-                            <button
-                              onClick={() => handleCopyText(msg.paymentData.yape_number, 'yape')}
-                              className="text-slate-400 hover:text-white"
-                              title="Copiar número de Yape"
-                            >
-                              {copiedField === 'yape' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                            </button>
-                          </div>
-
-                          <div className="flex items-center justify-between bg-slate-950 px-2 py-1.5 rounded-lg border border-slate-800">
-                            <span>Plin: <strong className="text-sky-400 font-mono">{msg.paymentData.plin_number}</strong></span>
-                            <button
-                              onClick={() => handleCopyText(msg.paymentData.plin_number, 'plin')}
-                              className="text-slate-400 hover:text-white"
-                              title="Copiar número de Plin"
-                            >
-                              {copiedField === 'plin' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                            </button>
-                          </div>
-
-                          <div className="flex items-center justify-between bg-slate-950 px-2 py-1.5 rounded-lg border border-slate-800">
-                            <span>BCP Soles: <strong className="text-white font-mono">{msg.paymentData.bank_account_soles}</strong></span>
-                            <button
-                              onClick={() => handleCopyText(msg.paymentData.bank_account_soles, 'bcp')}
-                              className="text-slate-400 hover:text-white"
-                              title="Copiar cuenta BCP"
-                            >
-                              {copiedField === 'bcp' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                            </button>
-                          </div>
-
-                          <div className="flex items-center justify-between bg-slate-950 px-2 py-1.5 rounded-lg border border-slate-800">
-                            <span>CCI: <strong className="text-white font-mono text-[10px]">{msg.paymentData.bank_cci}</strong></span>
-                            <button
-                              onClick={() => handleCopyText(msg.paymentData.bank_cci, 'cci')}
-                              className="text-slate-400 hover:text-white"
-                              title="Copiar CCI"
-                            >
-                              {copiedField === 'cci' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                            </button>
-                          </div>
-                        </div>
+                    {/* RENDERIZADO: RESUMEN DE PASARELA INTEGRADA (SIN CUENTAS PERSONALES) */}
+                    {msg.type === 'payment_info' && (
+                      <div className="mt-3 pt-2 border-t border-slate-700/60 text-[11px] text-slate-300 space-y-1">
+                        <p>• <strong className="text-purple-400">Yape / Plin:</strong> Pasarela OTP (celular + código de aprobación de 6 dígitos).</p>
+                        <p>• <strong className="text-sky-400">Transferencia CIP:</strong> Código CIP con vigencia de 24 horas.</p>
+                        <p>• <strong className="text-emerald-400">Tarjeta:</strong> Visa / Mastercard con validación 3D Secure.</p>
                       </div>
                     )}
                   </div>
