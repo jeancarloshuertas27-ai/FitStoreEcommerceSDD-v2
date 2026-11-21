@@ -10,6 +10,7 @@ out/
 
 # Environment files
 .env
+.env.*
 .env.local
 .env.development.local
 .env.test.local
@@ -44,9 +45,20 @@ Thumbs.db
 .cache/
 .eslintcache
 
-# SQLite temporary / journal files
+# SQLite database & journal files
+*.sqlite
 *.sqlite-journal
 *.sqlite3-journal
 *.sqlite-wal
 *.sqlite-shm
+
+# Cloudflare build artifacts & generated public bundle
+.cloudflare/
+.wrangler/
+.dev.vars
+.dev.vars*
+cloudflare-tienda/public/
+cloudflare-admin/public/
+
+
 
