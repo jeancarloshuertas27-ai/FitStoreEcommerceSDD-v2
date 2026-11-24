@@ -136,8 +136,11 @@ export default function App() {
           storeSettings={storeSettings}
           onUpdateSettings={(updated) => setStoreSettings(updated)}
           onNavigateStore={() => {
+            const storeUrl =
+              import.meta.env?.VITE_STORE_URL ||
+              'https://fitstore-tienda.j34n.workers.dev';
             window.open(
-              'https://fitstore-tienda.cafeluna-lima.workers.dev',
+              storeUrl,
               '_blank',
               'noopener,noreferrer'
             );
