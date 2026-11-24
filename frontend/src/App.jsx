@@ -8,6 +8,7 @@ import CheckoutModal from './components/CheckoutModal.jsx';
 import MercadoPagoReturnHandler from './components/MercadoPagoReturnHandler.jsx';
 import FitBotModal from './components/FitBotModal.jsx';
 import AuthModal from './components/AuthModal.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { useUser } from './context/UserContext.jsx';
 import api from './services/api.js';
 import {
@@ -125,28 +126,30 @@ export default function App() {
 
   if (IS_ADMIN_ONLY && AdminPanel) {
     return (
-      <React.Suspense
-        fallback={
-          <div className="min-h-screen bg-slate-950 text-slate-300 flex items-center justify-center text-sm font-bold">
-            Cargando Panel de Administración FitStore Pro...
-          </div>
-        }
-      >
-        <AdminPanel
-          storeSettings={storeSettings}
-          onUpdateSettings={(updated) => setStoreSettings(updated)}
-          onNavigateStore={() => {
-            const storeUrl =
-              import.meta.env?.VITE_STORE_URL ||
-              'https://fitstore-tienda.j34n.workers.dev';
-            window.open(
-              storeUrl,
-              '_blank',
-              'noopener,noreferrer'
-            );
-          }}
-        />
-      </React.Suspense>
+      <ErrorBoundary>
+        <React.Suspense
+          fallback={
+            <div className="min-h-screen bg-slate-950 text-slate-300 flex items-center justify-center text-sm font-bold">
+              Cargando Panel de Administración FitStore Pro...
+            </div>
+          }
+        >
+          <AdminPanel
+            storeSettings={storeSettings}
+            onUpdateSettings={(updated) => setStoreSettings(updated)}
+            onNavigateStore={() => {
+              const storeUrl =
+                import.meta.env?.VITE_STORE_URL ||
+                'https://fitstore-tienda.j34n.workers.dev';
+              window.open(
+                storeUrl,
+                '_blank',
+                'noopener,noreferrer'
+              );
+            }}
+          />
+        </React.Suspense>
+      </ErrorBoundary>
     );
   }
 
@@ -169,24 +172,26 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1">
         {!IS_STORE_ONLY && activeTab === 'admin' && AdminPanel ? (
-          <React.Suspense fallback={<div className="p-10 text-center text-slate-400 text-xs">Cargando panel administrativo...</div>}>
-            <AdminPanel
-              storeSettings={storeSettings}
-              onUpdateSettings={(updated) => setStoreSettings(updated)}
-              onNavigateStore={() => {
-                setActiveTab('store');
-                loadProducts();
-              }}
-              onOrdersUpdated={(ordersList) => {
-                const pending = ordersList.filter(
-                  (o) =>
-                    o.order_status === 'En Verificación' ||
-                    o.payment?.payment_status === 'Pendiente de Verificación'
-                ).length;
-                setPendingVerificationCount(pending);
-              }}
-            />
-          </React.Suspense>
+          <ErrorBoundary>
+            <React.Suspense fallback={<div className="p-10 text-center text-slate-400 text-xs">Cargando panel administrativo...</div>}>
+              <AdminPanel
+                storeSettings={storeSettings}
+                onUpdateSettings={(updated) => setStoreSettings(updated)}
+                onNavigateStore={() => {
+                  setActiveTab('store');
+                  loadProducts();
+                }}
+                onOrdersUpdated={(ordersList) => {
+                  const pending = ordersList.filter(
+                    (o) =>
+                      o.order_status === 'En Verificación' ||
+                      o.payment?.payment_status === 'Pendiente de Verificación'
+                  ).length;
+                  setPendingVerificationCount(pending);
+                }}
+              />
+            </React.Suspense>
+          </ErrorBoundary>
         ) : activeTab === 'profile' ? (
           <ProfileView
             onOpenAuth={(mode = 'login') => setAuthModal({ open: true, mode })}

@@ -101,6 +101,47 @@ export default function AdminPanel({
   const [deleteProductConfirm, setDeleteProductConfirm] = useState(null);
   const [productHistoricalError, setProductHistoricalError] = useState(null);
 
+  const [userModalOpen, setUserModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+
+  // Filtros
+  const [productSearch, setProductSearch] = useState('');
+  const [productCategoryFilter, setProductCategoryFilter] = useState('Todos');
+  const [orderStatusFilter, setOrderStatusFilter] = useState('Todos');
+  const [userSearch, setUserSearch] = useState('');
+
+  // Formulario de Producto
+  const [productForm, setProductForm] = useState({
+    name: '',
+    description: '',
+    category: 'Proteínas',
+    price: '',
+    stock: '',
+    image_url: SAMPLE_FITNESS_IMAGES[0].url,
+    featured: 0,
+  });
+
+  // Formulario de Usuario
+  const [userForm, setUserForm] = useState({
+    name: '',
+    dni: '',
+    email: '',
+    phone: '',
+    address: '',
+    city: 'Lima',
+  });
+
+  // Formulario de Configuración de Cuentas Receptoras
+  const [settingsForm, setSettingsForm] = useState({
+    owner_name: '',
+    yape_number: '',
+    plin_number: '',
+    bank_name: '',
+    bank_account_soles: '',
+    bank_cci: '',
+    whatsapp_notification: '',
+  });
+
   // Referencia y estado para deslizamiento horizontal anclado de Pedidos y Vouchers
   const ordersTableContainerRef = useRef(null);
   const [tableScrollState, setTableScrollState] = useState({
@@ -148,47 +189,6 @@ export default function AdminPanel({
       });
     }
   };
-
-  const [userModalOpen, setUserModalOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState(null);
-
-  // Filtros
-  const [productSearch, setProductSearch] = useState('');
-  const [productCategoryFilter, setProductCategoryFilter] = useState('Todos');
-  const [orderStatusFilter, setOrderStatusFilter] = useState('Todos');
-  const [userSearch, setUserSearch] = useState('');
-
-  // Formulario de Producto
-  const [productForm, setProductForm] = useState({
-    name: '',
-    description: '',
-    category: 'Proteínas',
-    price: '',
-    stock: '',
-    image_url: SAMPLE_FITNESS_IMAGES[0].url,
-    featured: 0,
-  });
-
-  // Formulario de Usuario
-  const [userForm, setUserForm] = useState({
-    name: '',
-    dni: '',
-    email: '',
-    phone: '',
-    address: '',
-    city: 'Lima',
-  });
-
-  // Formulario de Configuración de Cuentas Receptoras
-  const [settingsForm, setSettingsForm] = useState({
-    owner_name: '',
-    yape_number: '',
-    plin_number: '',
-    bank_name: '',
-    bank_account_soles: '',
-    bank_cci: '',
-    whatsapp_notification: '',
-  });
 
   // Copia al portapapeles
   const [copiedField, setCopiedField] = useState('');
