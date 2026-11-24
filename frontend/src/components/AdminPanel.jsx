@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ShieldCheck,
   Package,
@@ -33,6 +33,8 @@ import {
   Zap,
   Clock,
   Loader2,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import api from '../services/api.js';
 import ShippingRatesTab from './ShippingRatesTab.jsx';
@@ -97,6 +99,55 @@ export default function AdminPanel({
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [deleteProductConfirm, setDeleteProductConfirm] = useState(null);
+  const [productHistoricalError, setProductHistoricalError] = useState(null);
+
+  // Referencia y estado para deslizamiento horizontal anclado de Pedidos y Vouchers
+  const ordersTableContainerRef = useRef(null);
+  const [tableScrollState, setTableScrollState] = useState({
+    scrollLeft: 0,
+    maxScroll: 0,
+    canScrollLeft: false,
+    canScrollRight: false,
+  });
+
+  const updateTableScrollMetrics = () => {
+    const el = ordersTableContainerRef.current;
+    if (!el) return;
+    const max = Math.max(0, el.scrollWidth - el.clientWidth);
+    setTableScrollState({
+      scrollLeft: el.scrollLeft,
+      maxScroll: max,
+      canScrollLeft: el.scrollLeft > 5,
+      canScrollRight: el.scrollLeft < max - 5,
+    });
+  };
+
+  useEffect(() => {
+    updateTableScrollMetrics();
+    window.addEventListener('resize', updateTableScrollMetrics);
+    return () => window.removeEventListener('resize', updateTableScrollMetrics);
+  }, [orders, orderStatusFilter, activeTab]);
+
+  const handleTableScroll = () => {
+    updateTableScrollMetrics();
+  };
+
+  const scrollOrdersTableBy = (delta) => {
+    if (!ordersTableContainerRef.current) return;
+    ordersTableContainerRef.current.scrollBy({ left: delta, behavior: 'smooth' });
+  };
+
+  const scrollOrdersTableTo = (position) => {
+    if (!ordersTableContainerRef.current) return;
+    if (position === 'start') {
+      ordersTableContainerRef.current.scrollTo({ left: 0, behavior: 'smooth' });
+    } else if (position === 'end') {
+      ordersTableContainerRef.current.scrollTo({
+        left: ordersTableContainerRef.current.scrollWidth,
+        behavior: 'smooth',
+      });
+    }
+  };
 
   const [userModalOpen, setUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
@@ -351,7 +402,18 @@ export default function AdminPanel({
       await loadAllAdminData();
     } catch (err) {
       console.error('Error eliminando producto:', err);
-      showNotification(err.message || 'Error al eliminar producto', true);
+      const msg = String(err.message || '');
+      if (
+        msg.includes('histórico') ||
+        msg.includes('FOREIGN KEY') ||
+        msg.includes('pedidos') ||
+        msg.includes('409')
+      ) {
+        setProductHistoricalError(deleteProductConfirm);
+        setDeleteProductConfirm(null);
+      } else {
+        showNotification(err.message || 'Error al eliminar producto', true);
+      }
     }
   };
 
@@ -1068,11 +1130,15 @@ export default function AdminPanel({
               </div>
             </div>
 
-            {/* Tabla de Pedidos */}
-            <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-xl">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider border-b border-slate-800 text-[10px]">
+            {/* Tabla de Pedidos con Contenedor de Scroll y Barra Inferior Anclada */}
+            <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-xl flex flex-col">
+              <div
+                ref={ordersTableContainerRef}
+                onScroll={handleTableScroll}
+                className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-270px)] min-h-[320px] scrollbar-thin scrollbar-thumb-orange-500/40 scrollbar-track-slate-950/60"
+              >
+                <table className="w-full text-left text-xs min-w-[1050px]">
+                  <thead className="sticky top-0 z-10 bg-slate-950 text-slate-400 uppercase tracking-wider border-b border-slate-800 text-[10px] shadow-sm">
                     <tr>
                       <th className="py-3 px-4">Orden / Fecha</th>
                       <th className="py-3 px-4">Cliente & DNI</th>
@@ -1285,6 +1351,86 @@ export default function AdminPanel({
                     )}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Barra inferior anclada para deslizamiento horizontal de pedidos */}
+              <div className="sticky bottom-0 z-20 bg-slate-950/95 backdrop-blur-md border-t border-slate-800 p-2.5 sm:px-4 flex flex-wrap items-center justify-between gap-3 text-xs shadow-2xl">
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => scrollOrdersTableTo('start')}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold border border-slate-700 transition-all"
+                    title="Ir al inicio de la tabla (Orden y Cliente)"
+                  >
+                    Inicio
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollOrdersTableBy(-260)}
+                    disabled={!tableScrollState.canScrollLeft}
+                    className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-all ${
+                      tableScrollState.canScrollLeft
+                        ? 'bg-slate-800 hover:bg-orange-600 hover:text-white text-slate-200 border-slate-700'
+                        : 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed'
+                    }`}
+                    title="Deslizar horizontalmente hacia la izquierda"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Izquierda</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollOrdersTableBy(260)}
+                    disabled={!tableScrollState.canScrollRight}
+                    className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-all ${
+                      tableScrollState.canScrollRight
+                        ? 'bg-slate-800 hover:bg-orange-600 hover:text-white text-slate-200 border-slate-700'
+                        : 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed'
+                    }`}
+                    title="Deslizar horizontalmente hacia la derecha"
+                  >
+                    <span className="hidden sm:inline">Derecha</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollOrdersTableTo('end')}
+                    className="px-2.5 py-1.5 rounded-lg bg-orange-600/20 hover:bg-orange-600 text-orange-300 hover:text-white text-[11px] font-bold border border-orange-500/30 transition-all"
+                    title="Ir a Acciones y Auditoría"
+                  >
+                    Acciones ⏭
+                  </button>
+                </div>
+
+                <div className="flex-1 min-w-[150px] max-w-xs flex items-center gap-2">
+                  <span className="text-[10px] text-slate-500 font-mono">0%</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={tableScrollState.maxScroll || 100}
+                    value={tableScrollState.scrollLeft}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      if (ordersTableContainerRef.current) {
+                        ordersTableContainerRef.current.scrollLeft = val;
+                      }
+                      setTableScrollState((prev) => ({
+                        ...prev,
+                        scrollLeft: val,
+                        canScrollLeft: val > 5,
+                        canScrollRight: val < (prev.maxScroll - 5),
+                      }));
+                    }}
+                    className="w-full accent-orange-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                    title="Arrastra para deslizar la tabla horizontalmente de izquierda a derecha"
+                  />
+                  <span className="text-[10px] text-slate-500 font-mono">100%</span>
+                </div>
+
+                <div className="text-[11px] text-slate-400 hidden md:flex items-center gap-1.5">
+                  <span className="text-slate-500">Columnas:</span>
+                  <span className="text-slate-300 font-medium">Orden → Cliente → Total → Pago → Despacho → Auditoría</span>
+                </div>
               </div>
             </div>
           </div>
@@ -1910,6 +2056,61 @@ export default function AdminPanel({
                 className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2.5 px-4 rounded-xl text-xs"
               >
                 Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3.B: PRODUCTO CON HISTORIAL DE VENTAS */}
+      {productHistoricalError && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-3xl max-w-md w-full p-6 shadow-2xl relative space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto border border-amber-500/30">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+
+            <div className="text-center space-y-2">
+              <h3 className="text-base font-bold text-white">Producto con Historial de Ventas</h3>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                El producto <strong className="text-white">"{productHistoricalError.name}"</strong> no puede ser eliminado físicamente porque está vinculado a pedidos y comprobantes previos (protección de integridad referencial y contable).
+              </p>
+              <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 text-[11px] text-slate-300 text-left space-y-1">
+                <p className="font-semibold text-amber-300">💡 Solución recomendada:</p>
+                <p>
+                  Marca su stock en <strong>0 unidades</strong>. De este modo aparecerá como <strong>Agotado</strong> en la tienda y ningún cliente podrá comprarlo, protegiendo tus comprobantes históricos.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await api.updateProduct(productHistoricalError.id, {
+                      ...productHistoricalError,
+                      stock: 0,
+                    });
+                    showNotification(
+                      `Producto "${productHistoricalError.name}" marcado como Agotado (Stock: 0)`
+                    );
+                    setProductHistoricalError(null);
+                    await loadAllAdminData();
+                  } catch (err) {
+                    showNotification(err.message || 'Error al actualizar stock a 0', true);
+                  }
+                }}
+                className="flex-1 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold py-2.5 px-4 rounded-xl text-xs transition-all shadow-lg shadow-amber-600/20"
+              >
+                Marcar como Agotado (Stock 0)
+              </button>
+              <button
+                type="button"
+                onClick={() => setProductHistoricalError(null)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2.5 px-4 rounded-xl text-xs"
+              >
+                Cerrar
               </button>
             </div>
           </div>
